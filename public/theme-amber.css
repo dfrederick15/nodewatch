@@ -573,7 +573,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 
 /* ── Login dialog ─────────────────────────────────────────────────────────── */
 
-#login-dialog {
+#login-dialog, #chpw-dialog {
   display: none;
   position: fixed;
   inset: 0;
@@ -582,7 +582,8 @@ button:disabled { opacity: 0.35; cursor: default; }
   align-items: center;
   justify-content: center;
 }
-#login-dialog.open { display: flex; }
+#login-dialog.open, #chpw-dialog.open { display: flex; }
+.chpw-reason { font-size: 12px; color: var(--warn, #f5a623); margin-bottom: 12px; }
 
 .dialog-box {
   background: var(--surface-hi);

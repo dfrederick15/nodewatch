@@ -64,6 +64,7 @@ async function boot() {
   startLiveTimer();
   wireButtons();
   wireLoginDialog();
+  wireChangePasswordDialog();
   wireTabs();
 }
 
@@ -117,6 +118,9 @@ async function checkSession() {
   const res = await fetch("/api/session");
   const data = await res.json();
   setLoggedIn(data.logged_in, data.username);
+  if (data.logged_in && data.must_change_password) {
+    showChangePasswordDialog("The default password must be changed before you continue.", true);
+  }
 }
 
 // ── NTP clock ─────────────────────────────────────────────────────────────────
@@ -615,8 +619,50 @@ function renderSettings(cfg, area) {
       <input id="s-ami-read" type="number" min="1" value="${cfg.server.ami_read_timeout_s}">
     </div>`));
 
+  // ── Security ───────────────────────────────────────────────────────────────
+  const secBody = document.createElement("div");
+  secBody.innerHTML = `
+    <div class="settings-grid">
+      <label>Current Password</label>
+      <input type="password" id="s-cur-pw" autocomplete="current-password">
+      <label>New Password</label>
+      <input type="password" id="s-new-pw" autocomplete="new-password">
+      <label>Confirm New Password</label>
+      <input type="password" id="s-confirm-pw" autocomplete="new-password">
+    </div>
+    <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+      <button id="s-chpw-btn" class="primary">Change Password</button>
+      <span id="s-chpw-msg" style="font-size:12px"></span>
+    </div>`;
+  const secSection = settingsSection("Security", false, "");
+  secSection.querySelector(".settings-section-body").appendChild(secBody);
+  wrap.appendChild(secSection);
+
   area.innerHTML = "";
   area.appendChild(wrap);
+
+  // Wire Security section password change
+  document.getElementById("s-chpw-btn").addEventListener("click", async () => {
+    const msg  = document.getElementById("s-chpw-msg");
+    const cur  = document.getElementById("s-cur-pw").value;
+    const pw   = document.getElementById("s-new-pw").value;
+    const conf = document.getElementById("s-confirm-pw").value;
+    msg.style.color = "var(--muted)";
+    if (!cur || !pw || !conf) { msg.style.color = "var(--error)"; msg.textContent = "All fields are required."; return; }
+    if (pw !== conf)           { msg.style.color = "var(--error)"; msg.textContent = "New passwords do not match."; return; }
+    msg.textContent = "Saving…";
+    const data = await apiPost("/api/change-password", { current_password: cur, new_password: pw });
+    if (data.ok) {
+      msg.style.color = "var(--success, #4caf50)";
+      msg.textContent = "Password changed.";
+      document.getElementById("s-cur-pw").value = "";
+      document.getElementById("s-new-pw").value = "";
+      document.getElementById("s-confirm-pw").value = "";
+    } else {
+      msg.style.color = "var(--error)";
+      msg.textContent = data.error ?? "Failed to change password.";
+    }
+  });
 
   // Wire collapsible sections
   wrap.querySelectorAll(".settings-section-header").forEach(hdr => {
@@ -976,9 +1022,14 @@ function wireLoginDialog() {
     });
     if (data.ok) {
       close();
-      setLoggedIn(true, document.getElementById("dlg-user").value.trim());
+      const username = document.getElementById("dlg-user").value.trim();
+      setLoggedIn(true, username);
       if (currentTab === "settings") loadSettings();
       if (currentTab === "favorites") loadFavorites();
+      const sess = await fetch("/api/session").then(r => r.json());
+      if (sess.must_change_password) {
+        showChangePasswordDialog("The default password must be changed before you continue.", true);
+      }
     } else {
       errMsg.style.display = "block";
     }
@@ -991,6 +1042,62 @@ function wireLoginDialog() {
     if (e.key === "Enter") document.getElementById("dlg-pass").focus();
   });
   document.getElementById("dlg-pass").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+}
+
+// ── Change Password dialog ────────────────────────────────────────────────────
+
+function showChangePasswordDialog(reason, forced = false) {
+  const dialog = document.getElementById("chpw-dialog");
+  document.getElementById("chpw-reason").textContent = reason;
+  document.getElementById("chpw-error").style.display = "none";
+  document.getElementById("chpw-current").value = "";
+  document.getElementById("chpw-new").value = "";
+  document.getElementById("chpw-confirm").value = "";
+  document.getElementById("chpw-cancel").style.display = forced ? "none" : "";
+  dialog.dataset.forced = forced ? "1" : "";
+  dialog.classList.add("open");
+  document.getElementById("chpw-current").focus();
+}
+
+function wireChangePasswordDialog() {
+  const dialog  = document.getElementById("chpw-dialog");
+  const errMsg  = document.getElementById("chpw-error");
+
+  const showErr = (msg) => { errMsg.textContent = msg; errMsg.style.display = "block"; };
+  const clearErr = () => { errMsg.style.display = "none"; };
+
+  const close = () => {
+    if (dialog.dataset.forced === "1") return;
+    dialog.classList.remove("open");
+    clearErr();
+  };
+
+  const submit = async () => {
+    clearErr();
+    const cur  = document.getElementById("chpw-current").value;
+    const pw   = document.getElementById("chpw-new").value;
+    const conf = document.getElementById("chpw-confirm").value;
+    if (!cur)           { showErr("Enter your current password."); return; }
+    if (!pw)            { showErr("Enter a new password."); return; }
+    if (pw !== conf)    { showErr("New passwords do not match."); return; }
+    const data = await apiPost("/api/change-password", { current_password: cur, new_password: pw });
+    if (data.ok) {
+      dialog.classList.remove("open");
+      clearErr();
+    } else {
+      showErr(data.error ?? "Failed to change password.");
+    }
+  };
+
+  document.getElementById("chpw-submit").addEventListener("click", submit);
+  document.getElementById("chpw-cancel").addEventListener("click", close);
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });
+  document.getElementById("chpw-new").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("chpw-confirm").focus();
+  });
+  document.getElementById("chpw-confirm").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
   });
 }

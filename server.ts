@@ -597,7 +597,46 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === "/api/session") {
     const s = sessionFromReq(req);
-    json(res, 200, { logged_in: !!s, username: s?.username ?? null });
+    json(res, 200, {
+      logged_in: !!s,
+      username: s?.username ?? null,
+      must_change_password: !!s && cfg.auth.password === "changeme",
+    });
+    return;
+  }
+
+  if (pathname === "/api/change-password" && req.method === "POST") {
+    const s = sessionFromReq(req);
+    if (!s) { json(res, 401, { error: "Not logged in" }); return; }
+    const body = await readBody(req) as unknown as { current_password: string; new_password: string };
+    if (body.current_password !== cfg.auth.password) {
+      json(res, 400, { error: "Current password is incorrect" }); return;
+    }
+    if (!body.new_password || body.new_password.length < 8) {
+      json(res, 400, { error: "New password must be at least 8 characters" }); return;
+    }
+    if (body.new_password === body.current_password) {
+      json(res, 400, { error: "New password must differ from the current password" }); return;
+    }
+    // Update in-memory config
+    cfg.auth.password = body.new_password;
+    // Patch only the password line in config.toml so formatting is preserved
+    try {
+      const raw = fs.readFileSync("config.toml", "utf8");
+      let inAuth = false;
+      const patched = raw.split("\n").map(line => {
+        if (/^\[auth\]/.test(line))          { inAuth = true;  return line; }
+        if (/^\[/.test(line) && inAuth)      { inAuth = false; return line; }
+        if (inAuth && /^password\s*=/.test(line)) {
+          return `password = "${body.new_password}"`;
+        }
+        return line;
+      }).join("\n");
+      fs.writeFileSync("config.toml", patched);
+    } catch (err) {
+      console.error("Failed to persist password change:", err);
+    }
+    json(res, 200, { ok: true });
     return;
   }
 

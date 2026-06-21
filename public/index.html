@@ -144,6 +144,31 @@
   </div>
 </div>
 
+<!-- ── Change Password dialog ── -->
+<div id="chpw-dialog">
+  <div class="dialog-box">
+    <h2>Change Password</h2>
+    <p id="chpw-reason" class="chpw-reason"></p>
+    <div class="field-row">
+      <label>Current Password</label>
+      <input type="password" id="chpw-current" autocomplete="current-password">
+    </div>
+    <div class="field-row">
+      <label>New Password</label>
+      <input type="password" id="chpw-new" autocomplete="new-password">
+    </div>
+    <div class="field-row">
+      <label>Confirm New Password</label>
+      <input type="password" id="chpw-confirm" autocomplete="new-password">
+    </div>
+    <div class="error-msg" id="chpw-error"></div>
+    <div class="btn-row">
+      <button id="chpw-submit" class="primary">Change Password</button>
+      <button id="chpw-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 
 <footer id="site-footer">
