@@ -377,6 +377,7 @@ async function getExternalIps(): Promise<{ ipv4: string; ipv6: string }> {
 
 interface HostConn {
   socket: import("node:net").Socket | null;
+  _connecting: Promise<void> | null;
   client: AMIClient;
   nodeCfg: NodeConfig;
 }
@@ -387,20 +388,29 @@ async function ensureConnected(nodeCfg: NodeConfig): Promise<HostConn> {
   let conn = hostConns.get(key);
   if (!conn) {
     const client = new AMIClient(nodeCfg.host, cfg.server.ami_connect_timeout_s, cfg.server.ami_read_timeout_s);
-    conn = { socket: null, client, nodeCfg };
+    conn = { socket: null, _connecting: null, client, nodeCfg };
     hostConns.set(key, conn);
   }
-  if (!conn.socket || conn.socket.destroyed) {
-    try {
-      conn.socket = await conn.client.connect(nodeCfg.user, nodeCfg.password);
-      conn.socket.on("error", () => { conn!.socket = null; });
-      conn.socket.on("close",  () => { conn!.socket = null; });
-      console.log(`AMI connected: ${key} (node ${nodeCfg.node})`);
-    } catch (err) {
-      conn.socket = null;
-      throw err;
-    }
+  if (conn.socket && !conn.socket.destroyed) return conn;
+
+  // If a connect attempt is already in flight, wait for it rather than opening
+  // a second TCP socket to Asterisk (which would accumulate orphaned connections).
+  if (!conn._connecting) {
+    conn._connecting = (async () => {
+      try {
+        conn!.socket = await conn!.client.connect(nodeCfg.user, nodeCfg.password);
+        conn!.socket.on("error", () => { conn!.socket = null; });
+        conn!.socket.on("close",  () => { conn!.socket = null; });
+        console.log(`AMI connected: ${key} (node ${nodeCfg.node})`);
+      } catch (err) {
+        conn!.socket = null;
+        throw err;
+      } finally {
+        conn!._connecting = null;
+      }
+    })();
   }
+  await conn._connecting;
   return conn;
 }
 
@@ -436,8 +446,15 @@ export interface NodeStatusFull {
 // ── Poll loop ─────────────────────────────────────────────────────────────────
 
 const lastStatus = new Map<string, NodeStatusFull>();
+let pollInProgress = false;
 
 async function pollNodes(): Promise<void> {
+  if (pollInProgress) return;
+  pollInProgress = true;
+  try { await _pollNodes(); } finally { pollInProgress = false; }
+}
+
+async function _pollNodes(): Promise<void> {
   for (const nodeCfg of cfg.nodes) {
     const nodeStr = String(nodeCfg.node);
     try {
@@ -486,6 +503,14 @@ async function pollNodes(): Promise<void> {
 
 setInterval(pollNodes, cfg.server.poll_interval_ms);
 pollNodes();
+
+// SSE keepalive — comment sent every 25 s prevents NAT/proxy idle timeouts
+setInterval(() => {
+  for (const c of sseClients) {
+    try { c.res.write(": keepalive\n\n"); }
+    catch (_) { sseClients.delete(c); }
+  }
+}, 25_000);
 
 // ── Static file server ────────────────────────────────────────────────────────
 

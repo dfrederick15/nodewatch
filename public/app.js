@@ -176,21 +176,25 @@ function switchTab(name) {
 // ── SSE (Home tab) ────────────────────────────────────────────────────────────
 
 let sseSource = null;
+let sseErrorTimer = null;
 const spinChars = ["|", "/", "-", "\\"];
 let spinIdx = 0;
 
 function connectSSE() {
   if (sseSource) sseSource.close();
+  clearTimeout(sseErrorTimer);
   const nodeNums = config.nodes.map(n => n.node).join(",");
   sseSource = new EventSource(`/api/sse?nodes=${nodeNums}`);
 
   sseSource.addEventListener("node_status", (e) => {
+    clearTimeout(sseErrorTimer);
     renderNodeTable(JSON.parse(e.data));
     setStatusDot("connected");
     tick();
   });
 
   sseSource.addEventListener("node_times", (e) => {
+    clearTimeout(sseErrorTimer);
     const data = JSON.parse(e.data);
     liveTimes[data.node] = (data.connections ?? []).map(c => ({
       node:        c.node,
@@ -207,7 +211,12 @@ function connectSSE() {
     setStatusDot("error");
   });
 
-  sseSource.onerror = () => setStatusDot("error");
+  // Debounce: don't show "No Signal" for transient disconnects (e.g., page refresh
+  // creates a new EventSource before the old one fully closes on the server side).
+  sseSource.onerror = () => {
+    clearTimeout(sseErrorTimer);
+    sseErrorTimer = setTimeout(() => setStatusDot("error"), 2500);
+  };
 }
 
 function tick() {
