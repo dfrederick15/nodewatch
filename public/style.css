@@ -222,6 +222,23 @@ button:disabled { opacity: 0.4; cursor: default; }
   text-align: center;
 }
 
+/* ── Expand button + subnode rows ────────────────────────────────────── */
+.expand-cell { padding: 0 4px 0 8px !important; width: 28px; }
+.expand-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.expand-btn:hover { background: var(--border); color: var(--text); }
+.subnode-row td { background: #1b1f2a; padding-top: 4px; padding-bottom: 4px; }
+.subnode-row:hover td { background: #20263a; }
+.subnode-row .subnode-node { color: var(--muted); font-size: 11px; }
+.subnode-hidden { display: none; }
+
 /* ── Output / result area ────────────────────────────────────────────── */
 #result-box {
   background: var(--bg);

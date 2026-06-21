@@ -1,25 +1,25 @@
 /**
- * server.ts — AllStar Node Monitor web server
+ * server.ts — AllStar Node Monitor
  *
- * Run with:  npm start
- *            (requires Node.js >= 22.6 for --experimental-strip-types)
+ * Run:  npm start   (node --experimental-strip-types server.ts)
  *
  * What this does:
- *   1. Reads config.toml for all settings and node definitions.
- *   2. Serves the static UI from ./public/
- *   3. Opens a persistent AMI connection to each configured Asterisk server
- *      and polls node status on the configured interval.
- *   4. Pushes status updates to browsers via Server-Sent Events (SSE).
- *   5. Exposes a small REST API for connect/disconnect/DTMF/command actions.
- *   6. Handles session-based authentication (cookie, no database needed).
+ *  1. Reads config.toml for all settings.
+ *  2. Optionally reads the AllStar node database (astdb.txt) for callsign/location lookups.
+ *  3. Maintains one persistent AMI connection per Asterisk host; reconnects on drop.
+ *  4. Polls each node on the configured interval and pushes changes via SSE.
+ *  5. Fetches what each connected remote node is itself connected to (subnodes)
+ *     from the AllStar stats API — cached, non-blocking.
+ *  6. Exposes a small REST API for connect/disconnect/DTMF/command actions.
+ *  7. Session-based auth via HttpOnly cookie — no database needed.
  */
 
 import * as http from "node:http";
-import * as fs from "node:fs";
+import * as fs   from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { parse as parseToml } from "smol-toml";
-import { AMIClient, type NodeStatus } from "./ami.ts";
+import { AMIClient, type NodeStatus, type NodeConn } from "./ami.ts";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -32,11 +32,6 @@ interface NodeConfig {
   private?: boolean;
   stream_url?: string;
   website_url?: string;
-}
-
-interface CommandConfig {
-  label: string;
-  command: string;
 }
 
 interface Config {
@@ -61,7 +56,7 @@ interface Config {
     timezone: string;
   };
   nodes: NodeConfig[];
-  commands: CommandConfig[];
+  commands: { label: string; command: string }[];
 }
 
 const configPath = new URL("./config.toml", import.meta.url).pathname;
@@ -73,22 +68,104 @@ try {
   process.exit(1);
 }
 
-// ── Session store ─────────────────────────────────────────────────────────────
-// Sessions are stored in memory — they clear on server restart (intentional).
+// ── AllStar node database (astdb.txt) ─────────────────────────────────────────
+// Maps node number → "CALLSIGN City, State"
+// The astdb.txt file is maintained by AllStar and contains public node info.
+// Common paths: /var/www/html/allmon3/astdb.txt  or  /var/lib/asterisk/astdb.txt
+// If the file isn't found, node info just shows the IP or stays blank.
 
-interface Session {
-  username: string;
-  expires: number;
+const astdb = new Map<string, string>();
+const ASTDB_PATHS = [
+  "/var/www/html/allmon3/astdb.txt",
+  "/var/www/html/supermon/astdb.txt",
+  "/var/lib/asterisk/astdb.txt",
+];
+
+function loadAstdb(): void {
+  for (const p of ASTDB_PATHS) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      const lines = fs.readFileSync(p, "utf8").split("\n");
+      for (const line of lines) {
+        const parts = line.split("|");
+        if (parts.length >= 4) {
+          const info = [parts[1], parts[2], parts[3]].filter(Boolean).join(" ").trim();
+          astdb.set(parts[0].trim(), info);
+        }
+      }
+      console.log(`Loaded ${astdb.size} nodes from ${p}`);
+      return;
+    } catch (_) {}
+  }
+}
+loadAstdb();
+
+function nodeInfo(nodeNum: string): string {
+  return astdb.get(nodeNum) ?? "";
 }
 
+// ── Subnode cache ─────────────────────────────────────────────────────────────
+// For each remote node connected to us, we fetch what IT is connected to
+// from the AllStar stats API. Results are cached for SUBNODE_TTL ms.
+
+interface SubnodeEntry {
+  node: string;
+  info: string;
+}
+
+interface SubnodeCacheEntry {
+  subnodes: SubnodeEntry[];
+  fetchedAt: number;
+}
+
+const subnodeCache = new Map<string, SubnodeCacheEntry>();
+const SUBNODE_TTL = 60_000; // 60 seconds
+
+async function fetchSubnodes(nodeNum: string): Promise<SubnodeEntry[]> {
+  const cached = subnodeCache.get(nodeNum);
+  if (cached && Date.now() - cached.fetchedAt < SUBNODE_TTL) {
+    return cached.subnodes;
+  }
+
+  try {
+    // AllStar stats API — returns connection info for any node on the network.
+    // This is a public, unauthenticated endpoint.
+    const url = `https://stats.allstarlink.org/api/v1/node/${nodeNum}`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+      headers: { "User-Agent": "nodewatch/1.0" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json() as Record<string, unknown>;
+
+    const subnodes: SubnodeEntry[] = [];
+
+    // The AllStar API returns a "conns" or "connections" array.
+    // Each entry has at minimum a node number.
+    const conns = (data.conns ?? data.connections ?? []) as Array<Record<string, unknown>>;
+    for (const conn of conns) {
+      const n = String(conn.node ?? conn.nodenum ?? conn.id ?? "").trim();
+      if (n && n !== nodeNum) {
+        subnodes.push({ node: n, info: nodeInfo(n) });
+      }
+    }
+
+    subnodeCache.set(nodeNum, { subnodes, fetchedAt: Date.now() });
+    return subnodes;
+  } catch (_) {
+    // API unreachable or node not found — return empty, don't cache so we retry later
+    return [];
+  }
+}
+
+// ── Session store ─────────────────────────────────────────────────────────────
+
+interface Session { username: string; expires: number; }
 const sessions = new Map<string, Session>();
 
 function createSession(username: string): string {
   const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, {
-    username,
-    expires: Date.now() + cfg.auth.session_timeout_s * 1000,
-  });
+  sessions.set(token, { username, expires: Date.now() + cfg.auth.session_timeout_s * 1000 });
   return token;
 }
 
@@ -96,10 +173,7 @@ function getSession(token: string | undefined): Session | null {
   if (!token) return null;
   const s = sessions.get(token);
   if (!s) return null;
-  if (Date.now() > s.expires) {
-    sessions.delete(token);
-    return null;
-  }
+  if (Date.now() > s.expires) { sessions.delete(token); return null; }
   return s;
 }
 
@@ -118,76 +192,68 @@ function sessionFromReq(req: http.IncomingMessage): Session | null {
 }
 
 // ── AMI connection pool ───────────────────────────────────────────────────────
-// One persistent AMI socket per unique Asterisk host.
-// If a socket disconnects, it is re-established on the next poll cycle.
 
 interface HostConn {
   socket: import("node:net").Socket | null;
   client: AMIClient;
-  nodeConfig: NodeConfig; // first node config that uses this host
+  nodeCfg: NodeConfig;
 }
-
 const hostConns = new Map<string, HostConn>();
 
 async function ensureConnected(nodeCfg: NodeConfig): Promise<HostConn> {
   const key = nodeCfg.host;
   let conn = hostConns.get(key);
-
   if (!conn) {
-    const client = new AMIClient(
-      nodeCfg.host,
-      cfg.server.ami_connect_timeout_s,
-      cfg.server.ami_read_timeout_s,
-    );
-    conn = { socket: null, client, nodeConfig: nodeCfg };
+    const client = new AMIClient(nodeCfg.host, cfg.server.ami_connect_timeout_s, cfg.server.ami_read_timeout_s);
+    conn = { socket: null, client, nodeCfg };
     hostConns.set(key, conn);
   }
-
   if (!conn.socket || conn.socket.destroyed) {
     try {
       conn.socket = await conn.client.connect(nodeCfg.user, nodeCfg.password);
-      conn.socket.on("error", () => {
-        conn!.socket = null;
-      });
-      conn.socket.on("close", () => {
-        conn!.socket = null;
-      });
+      conn.socket.on("error", () => { conn!.socket = null; });
+      conn.socket.on("close",  () => { conn!.socket = null; });
       console.log(`AMI connected: ${key} (node ${nodeCfg.node})`);
     } catch (err) {
       conn.socket = null;
       throw err;
     }
   }
-
   return conn;
 }
 
 // ── SSE broadcaster ───────────────────────────────────────────────────────────
 
-interface SSEClient {
-  res: http.ServerResponse;
-  nodeNumbers: string[];
-}
-
-const sseClients: Set<SSEClient> = new Set();
+interface SSEClient { res: http.ServerResponse; }
+const sseClients = new Set<SSEClient>();
 
 function sseWrite(client: SSEClient, event: string, data: unknown): void {
-  try {
-    client.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  } catch (_) {
-    sseClients.delete(client);
-  }
+  try { client.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
+  catch (_) { sseClients.delete(client); }
 }
 
-function broadcastAll(event: string, data: unknown): void {
-  for (const client of sseClients) {
-    sseWrite(client, event, data);
-  }
+function broadcast(event: string, data: unknown): void {
+  for (const c of sseClients) sseWrite(c, event, data);
+}
+
+// ── Extended status type (status + subnodes + info) ───────────────────────────
+
+export interface NodeConnFull extends NodeConn {
+  info: string;
+  subnodes: SubnodeEntry[];
+}
+
+export interface NodeStatusFull {
+  node: string;
+  cos_keyed: boolean;
+  tx_keyed: boolean;
+  connections: NodeConnFull[];
+  error?: string;
 }
 
 // ── Poll loop ─────────────────────────────────────────────────────────────────
 
-const lastStatus = new Map<string, NodeStatus>();
+const lastStatus = new Map<string, NodeStatusFull>();
 
 async function pollNodes(): Promise<void> {
   for (const nodeCfg of cfg.nodes) {
@@ -198,107 +264,100 @@ async function pollNodes(): Promise<void> {
 
       const status = await conn.client.getNodeStatus(conn.socket, nodeStr);
 
-      // Only push to SSE clients if something changed
+      // Enrich connections with info from astdb and subnodes from stats API
+      const connsFull: NodeConnFull[] = await Promise.all(
+        status.connections.map(async (c) => {
+          const subnodes = c.node !== "1" ? await fetchSubnodes(c.node) : [];
+          return { ...c, info: nodeInfo(c.node), subnodes };
+        })
+      );
+
+      const full: NodeStatusFull = {
+        node: status.node,
+        cos_keyed: status.cos_keyed,
+        tx_keyed: status.tx_keyed,
+        connections: connsFull,
+      };
+
+      // Push full status only when something changed
       const prev = JSON.stringify(lastStatus.get(nodeStr));
-      const curr = JSON.stringify(status);
+      const curr = JSON.stringify(full);
       if (prev !== curr) {
-        lastStatus.set(nodeStr, status);
-        broadcastAll("node_status", status);
+        lastStatus.set(nodeStr, full);
+        broadcast("node_status", full);
       }
 
-      // Always send timing updates (elapsed / last_keyed counters)
-      broadcastAll("node_times", {
+      // Always push timing so clients can tick their live counters
+      broadcast("node_times", {
         node: nodeStr,
-        connections: status.connections.map((c) => ({
+        connections: connsFull.map((c) => ({
           node: c.node,
           elapsed: c.elapsed,
           last_keyed: c.last_keyed,
         })),
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      broadcastAll("node_error", { node: nodeStr, error: msg });
+      broadcast("node_error", { node: nodeStr, error: (err as Error).message });
     }
   }
 }
 
 setInterval(pollNodes, cfg.server.poll_interval_ms);
-// Run immediately on start too
 pollNodes();
 
 // ── Static file server ────────────────────────────────────────────────────────
 
 const MIME: Record<string, string> = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".ico": "image/x-icon",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
+  ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+  ".json": "application/json", ".ico": "image/x-icon",
+  ".png": "image/png", ".svg": "image/svg+xml",
 };
+const publicDir = new URL("./public", import.meta.url).pathname;
 
 function serveStatic(res: http.ServerResponse, filePath: string): void {
-  const ext = path.extname(filePath);
-  const mime = MIME[ext] ?? "application/octet-stream";
+  const mime = MIME[path.extname(filePath)] ?? "application/octet-stream";
   try {
-    const data = fs.readFileSync(filePath);
     res.writeHead(200, { "Content-Type": mime });
-    res.end(data);
-  } catch (_) {
-    res.writeHead(404);
-    res.end("Not found");
-  }
+    res.end(fs.readFileSync(filePath));
+  } catch (_) { res.writeHead(404); res.end("Not found"); }
 }
 
-// ── Request body helper ───────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function readBody(req: http.IncomingMessage): Promise<Record<string, string>> {
   return new Promise((resolve) => {
     let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
+    req.on("data", (c) => (raw += c));
     req.on("end", () => {
-      try {
-        resolve(JSON.parse(raw));
-      } catch (_) {
-        // Try URL-encoded form data
-        const params = new URLSearchParams(raw);
-        const out: Record<string, string> = {};
-        params.forEach((v, k) => (out[k] = v));
-        resolve(out);
+      try { resolve(JSON.parse(raw)); }
+      catch (_) {
+        const p = new URLSearchParams(raw);
+        const o: Record<string, string> = {};
+        p.forEach((v, k) => (o[k] = v));
+        resolve(o);
       }
     });
   });
 }
-
-// ── JSON response helpers ──────────────────────────────────────────────────────
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
 
-function requireAuth(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-): Session | null {
-  const session = sessionFromReq(req);
-  if (!session) {
-    json(res, 401, { error: "Not logged in" });
-    return null;
-  }
-  return session;
+function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): Session | null {
+  const s = sessionFromReq(req);
+  if (!s) { json(res, 401, { error: "Not logged in" }); return null; }
+  return s;
 }
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
-const publicDir = new URL("./public", import.meta.url).pathname;
-
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", `http://localhost`);
+  const url      = new URL(req.url ?? "/", "http://localhost");
   const pathname = url.pathname;
 
-  // ── Auth endpoints ─────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
 
   if (pathname === "/api/login" && req.method === "POST") {
     const body = await readBody(req);
@@ -320,195 +379,128 @@ const server = http.createServer(async (req, res) => {
     if (token) sessions.delete(token);
     res.writeHead(200, {
       "Content-Type": "application/json",
-      "Set-Cookie": `asl_session=; HttpOnly; Path=/; Max-Age=0`,
+      "Set-Cookie": "asl_session=; HttpOnly; Path=/; Max-Age=0",
     });
     res.end(JSON.stringify({ ok: true }));
     return;
   }
 
-  // ── Config endpoint (read-only, no secrets) ────────────────────────────
+  // ── Public read-only endpoints ────────────────────────────────────────────
+
+  if (pathname === "/api/session") {
+    const s = sessionFromReq(req);
+    json(res, 200, { logged_in: !!s, username: s?.username ?? null });
+    return;
+  }
 
   if (pathname === "/api/config") {
     json(res, 200, {
       display: cfg.display,
       nodes: cfg.nodes.map((n) => ({
-        node: n.node,
-        label: n.label ?? "",
-        private: n.private ?? false,
-        stream_url: n.stream_url ?? "",
-        website_url: n.website_url ?? "",
+        node: n.node, label: n.label ?? "", private: n.private ?? false,
+        stream_url: n.stream_url ?? "", website_url: n.website_url ?? "",
       })),
       commands: cfg.commands,
     });
     return;
   }
 
-  // ── Session status ─────────────────────────────────────────────────────
-
-  if (pathname === "/api/session") {
-    const session = sessionFromReq(req);
-    json(res, 200, { logged_in: !!session, username: session?.username ?? null });
-    return;
-  }
-
-  // ── SSE stream ─────────────────────────────────────────────────────────
+  // ── SSE stream ────────────────────────────────────────────────────────────
 
   if (pathname === "/api/sse") {
-    const nodeParam = url.searchParams.get("nodes") ?? "";
-    const nodeNumbers = nodeParam.split(",").filter(Boolean);
-
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "X-Accel-Buffering": "no",
       Connection: "keep-alive",
     });
-
-    // Send current known status immediately so the page isn't blank
-    for (const [nodeStr, status] of lastStatus) {
-      if (nodeNumbers.length === 0 || nodeNumbers.includes(nodeStr)) {
-        res.write(`event: node_status\ndata: ${JSON.stringify(status)}\n\n`);
-      }
+    // Send current known state immediately so page isn't blank on load
+    for (const status of lastStatus.values()) {
+      res.write(`event: node_status\ndata: ${JSON.stringify(status)}\n\n`);
     }
-
-    const client: SSEClient = { res, nodeNumbers };
+    const client: SSEClient = { res };
     sseClients.add(client);
-
     req.on("close", () => sseClients.delete(client));
     return;
   }
 
-  // All API routes below require authentication
+  // ── Authenticated action endpoints ────────────────────────────────────────
+
   if (pathname.startsWith("/api/") && req.method === "POST") {
-    const session = requireAuth(req, res);
-    if (!session) return;
+    if (!requireAuth(req, res)) return;
     const body = await readBody(req);
 
     const localNode = body.local_node;
-    if (!localNode) {
-      json(res, 400, { error: "local_node is required" });
-      return;
-    }
+    if (!localNode) { json(res, 400, { error: "local_node is required" }); return; }
 
     const nodeCfg = cfg.nodes.find((n) => String(n.node) === localNode);
-    if (!nodeCfg) {
-      json(res, 400, { error: `Node ${localNode} not in config.toml` });
-      return;
-    }
-
-    // ── Connect ──────────────────────────────────────────────────────────
+    if (!nodeCfg) { json(res, 400, { error: `Node ${localNode} not in config.toml` }); return; }
 
     if (pathname === "/api/connect") {
-      // mode options: "connect" | "monitor" | "localmonitor"
-      // permanent: "true" | "false"
       const remoteNode = body.remote_node;
-      const mode = body.mode ?? "connect";
+      const mode      = body.mode ?? "connect";
       const permanent = body.permanent === "true";
-
-      if (!remoteNode) {
-        json(res, 400, { error: "remote_node is required" });
-        return;
-      }
-
-      // ilink codes:
-      //  3=connect  13=permanent-connect
-      //  2=monitor  12=permanent-monitor
-      //  8=local-monitor  18=permanent-local-monitor
+      if (!remoteNode) { json(res, 400, { error: "remote_node is required" }); return; }
+      // ilink codes: connect=3/13  monitor=2/12  localmonitor=8/18
       const codes: Record<string, [number, number]> = {
-        connect:      [3,  13],
-        monitor:      [2,  12],
-        localmonitor: [8,  18],
+        connect: [3, 13], monitor: [2, 12], localmonitor: [8, 18],
       };
-      const pair = codes[mode] ?? codes.connect;
-      const code = permanent ? pair[1] : pair[0];
-
+      const [temp, perm] = codes[mode] ?? codes.connect;
       try {
         const conn = await ensureConnected(nodeCfg);
-        await conn.client.ilink(conn.socket!, localNode, remoteNode, code);
+        await conn.client.ilink(conn.socket!, localNode, remoteNode, permanent ? perm : temp);
         json(res, 200, { ok: true, message: `${mode} ${localNode} → ${remoteNode}` });
-      } catch (err) {
-        json(res, 500, { error: String(err) });
-      }
+      } catch (err) { json(res, 500, { error: String(err) }); }
       return;
     }
-
-    // ── Disconnect ───────────────────────────────────────────────────────
 
     if (pathname === "/api/disconnect") {
       const remoteNode = body.remote_node;
-      const permanent = body.permanent === "true";
-      if (!remoteNode) {
-        json(res, 400, { error: "remote_node is required" });
-        return;
-      }
-      // ilink 1 = temporary disconnect, ilink 11 = permanent disconnect
-      const code = permanent ? 11 : 1;
+      const permanent  = body.permanent === "true";
+      if (!remoteNode) { json(res, 400, { error: "remote_node is required" }); return; }
+      // ilink 1 = temporary disconnect, 11 = permanent
       try {
         const conn = await ensureConnected(nodeCfg);
-        await conn.client.ilink(conn.socket!, localNode, remoteNode, code);
+        await conn.client.ilink(conn.socket!, localNode, remoteNode, permanent ? 11 : 1);
         json(res, 200, { ok: true, message: `disconnect ${localNode} ↔ ${remoteNode}` });
-      } catch (err) {
-        json(res, 500, { error: String(err) });
-      }
+      } catch (err) { json(res, 500, { error: String(err) }); }
       return;
     }
 
-    // ── DTMF ─────────────────────────────────────────────────────────────
-
     if (pathname === "/api/dtmf") {
       const digits = body.digits;
-      if (!digits) {
-        json(res, 400, { error: "digits is required" });
-        return;
-      }
+      if (!digits) { json(res, 400, { error: "digits is required" }); return; }
       try {
         const conn = await ensureConnected(nodeCfg);
         await conn.client.dtmf(conn.socket!, localNode, digits);
         json(res, 200, { ok: true, message: `DTMF ${digits} → node ${localNode}` });
-      } catch (err) {
-        json(res, 500, { error: String(err) });
-      }
+      } catch (err) { json(res, 500, { error: String(err) }); }
       return;
     }
 
-    // ── Control panel command ─────────────────────────────────────────────
-
     if (pathname === "/api/command") {
       const cmdTemplate = body.command;
-      if (!cmdTemplate) {
-        json(res, 400, { error: "command is required" });
-        return;
-      }
-      // Validate the command is in the config (prevents arbitrary command injection)
+      if (!cmdTemplate) { json(res, 400, { error: "command is required" }); return; }
+      // Whitelist: command must be in config.toml [[commands]]
       const allowed = cfg.commands.find((c) => c.command === cmdTemplate);
-      if (!allowed) {
-        json(res, 403, { error: "Command not in config.toml [[commands]] list" });
-        return;
-      }
+      if (!allowed) { json(res, 403, { error: "Command not in config.toml [[commands]] list" }); return; }
       const cmdString = cmdTemplate.replace(/%node%/g, localNode);
       try {
         const conn = await ensureConnected(nodeCfg);
         const output = await conn.client.command(conn.socket!, cmdString);
         json(res, 200, { ok: true, output });
-      } catch (err) {
-        json(res, 500, { error: String(err) });
-      }
+      } catch (err) { json(res, 500, { error: String(err) }); }
       return;
     }
 
-    json(res, 404, { error: "Unknown API endpoint" });
+    json(res, 404, { error: "Unknown endpoint" });
     return;
   }
 
-  // ── Static files ───────────────────────────────────────────────────────
+  // ── Static files ──────────────────────────────────────────────────────────
 
-  let filePath = path.join(publicDir, pathname === "/" ? "index.html" : pathname);
-  // Security: don't serve files outside of publicDir
-  if (!filePath.startsWith(publicDir)) {
-    res.writeHead(403);
-    res.end("Forbidden");
-    return;
-  }
+  const filePath = path.join(publicDir, pathname === "/" ? "index.html" : pathname);
+  if (!filePath.startsWith(publicDir)) { res.writeHead(403); res.end("Forbidden"); return; }
   serveStatic(res, filePath);
 });
 
