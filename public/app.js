@@ -27,6 +27,7 @@ const expandedRows = new Set();
 async function boot() {
   await loadConfig();
   await checkSession();
+  await initClock();
   connectSSE();
   startLiveTimer();
   wireButtons();
@@ -69,6 +70,38 @@ async function checkSession() {
   const res = await fetch("/api/session");
   const data = await res.json();
   setLoggedIn(data.logged_in, data.username);
+}
+
+// ── NTP clock ─────────────────────────────────────────────────────────────────
+// Fetch the server's NTP-corrected time once, calculate the offset from our
+// local clock, then tick the display every second using that offset so the
+// clock stays accurate without hitting the server on every tick.
+
+let clockOffsetMs = 0;
+
+async function initClock() {
+  try {
+    const t0   = Date.now();
+    const data = await fetch("/api/time").then(r => r.json());
+    const t1   = Date.now();
+    // Correct for one-way network latency (assume symmetric)
+    clockOffsetMs = data.unix_ms - Math.round((t0 + t1) / 2);
+    const el = document.getElementById("clock-area");
+    if (el && data.ntp_server) el.title = `UTC from ${data.ntp_server} · offset ${data.offset_ms >= 0 ? "+" : ""}${data.offset_ms} ms`;
+  } catch (_) {
+    // If the endpoint fails, clockOffsetMs stays 0 and we show the browser clock
+  }
+  tickClock();
+  setInterval(tickClock, 1000);
+}
+
+function tickClock() {
+  const now = new Date(Date.now() + clockOffsetMs);
+  const hh  = String(now.getUTCHours()).padStart(2, "0");
+  const mm  = String(now.getUTCMinutes()).padStart(2, "0");
+  const ss  = String(now.getUTCSeconds()).padStart(2, "0");
+  const el  = document.getElementById("clock");
+  if (el) el.textContent = `${hh}:${mm}:${ss}`;
 }
 
 // ── Tab routing ───────────────────────────────────────────────────────────────

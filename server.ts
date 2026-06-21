@@ -14,12 +14,75 @@
  *  7. Session-based auth via HttpOnly cookie — no database needed.
  */
 
-import * as http from "node:http";
-import * as fs   from "node:fs";
-import * as path from "node:path";
+import * as http  from "node:http";
+import * as fs    from "node:fs";
+import * as path  from "node:path";
 import * as crypto from "node:crypto";
+import * as dgram from "node:dgram";
 import { parse as parseToml } from "smol-toml";
 import { AMIClient, type NodeStatus, type NodeConn } from "./ami.ts";
+
+// ── NTP client ────────────────────────────────────────────────────────────────
+// Sends a single RFC 4330 client packet to pool.ntp.org and reads back the
+// Transmit Timestamp (bytes 40–47). No external dependencies — uses Node's
+// built-in dgram module. Falls back to the OS clock if NTP is unreachable.
+//
+// ntpOffsetMs: correction to add to Date.now() to get NTP-sourced UTC ms.
+// On a properly-configured Linux host systemd-timesyncd already keeps the OS
+// clock within a few ms of NTP, so this offset is usually 0 ± a few ms.
+
+let ntpOffsetMs  = 0;
+let ntpSyncedAt  = 0;       // timestamp of last successful sync
+let ntpServer    = "pool.ntp.org";
+
+function queryNtp(host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const sock   = dgram.createSocket("udp4");
+    const packet = Buffer.alloc(48, 0);
+    packet[0] = 0x1b; // LI=0  VN=3  Mode=3 (client)
+
+    const timer = setTimeout(() => {
+      sock.close();
+      reject(new Error(`NTP timeout (${host})`));
+    }, 5_000);
+
+    sock.on("message", (msg) => {
+      clearTimeout(timer);
+      sock.close();
+      if (msg.length < 48) { reject(new Error("NTP response too short")); return; }
+      // Transmit Timestamp: 4-byte seconds + 4-byte fraction at offset 40
+      // NTP epoch is 1 Jan 1900; Unix epoch is 1 Jan 1970 — delta is 70 years
+      const NTP_DELTA = 2_208_988_800;
+      const secs = msg.readUInt32BE(40) - NTP_DELTA;
+      const frac = msg.readUInt32BE(44);
+      resolve(secs * 1_000 + Math.trunc(frac / 4_294_967.296));
+    });
+
+    sock.on("error", (err) => { clearTimeout(timer); try { sock.close(); } catch (_) {} reject(err); });
+
+    sock.send(packet, 0, 48, 123, host, (err) => {
+      if (err) { clearTimeout(timer); sock.close(); reject(err); }
+    });
+  });
+}
+
+async function syncNtp(): Promise<void> {
+  try {
+    const t0  = Date.now();
+    const ntp = await queryNtp(ntpServer);
+    const t1  = Date.now();
+    // Correct for one-way latency by assuming symmetric round-trip
+    ntpOffsetMs = ntp - Math.round((t0 + t1) / 2);
+    ntpSyncedAt = Date.now();
+    console.log(`NTP synced to ${ntpServer}: offset ${ntpOffsetMs > 0 ? "+" : ""}${ntpOffsetMs} ms`);
+  } catch (err) {
+    console.warn(`NTP sync failed (${ntpServer}):`, (err as Error).message, "— using OS clock");
+  }
+}
+
+// Sync on startup; re-sync every 10 minutes so drift stays negligible
+syncNtp();
+setInterval(syncNtp, 10 * 60 * 1_000);
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -454,6 +517,16 @@ const server = http.createServer(async (req, res) => {
   if (pathname === "/api/session") {
     const s = sessionFromReq(req);
     json(res, 200, { logged_in: !!s, username: s?.username ?? null });
+    return;
+  }
+
+  if (pathname === "/api/time") {
+    json(res, 200, {
+      unix_ms:    Date.now() + ntpOffsetMs,
+      offset_ms:  ntpOffsetMs,
+      ntp_server: ntpServer,
+      synced_at:  ntpSyncedAt,
+    });
     return;
   }
 
