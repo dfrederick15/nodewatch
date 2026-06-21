@@ -35,6 +35,13 @@ die()  { echo -e "\n${R}  ✗  ERROR:${NC} $*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "Run as root:  sudo bash install.sh"
 
+# ── Find a free port ──────────────────────────────────────────────────────────
+REQUESTED_PORT=$PORT
+while ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q .; do
+  PORT=$(( PORT + 1 ))
+done
+[[ $PORT -ne $REQUESTED_PORT ]] && warn "Port $REQUESTED_PORT is in use — using $PORT instead"
+
 # ── Update-only path ──────────────────────────────────────────────────────────
 if $UPDATE_ONLY; then
   [[ -d "$INSTALL_DIR/.git" ]] || die "$INSTALL_DIR not found. Run without --update to do a fresh install."
