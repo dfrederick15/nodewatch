@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# nodewatch — AllStar Node Monitor control script
+# Installed to /usr/local/bin/nodewatch by the installer.
+#
+# Usage:
+#   nodewatch status       — service status
+#   nodewatch start        — start the service
+#   nodewatch stop         — stop the service
+#   nodewatch restart      — restart the service
+#   nodewatch logs         — live log stream (Ctrl-C to exit)
+#   nodewatch update       — pull latest code and restart
+#   nodewatch configure    — re-read Asterisk config and rewrite config.toml
+#   nodewatch uninstall    — remove nodewatch from this system
+
+INSTALL_DIR="/opt/nodewatch"
+SERVICE="nodewatch"
+CTL_BIN="/usr/local/bin/nodewatch"
+SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
+
+G='\033[0;32m'; R='\033[0;31m'; B='\033[1;34m'; NC='\033[0m'
+info() { echo -e "${G}  ✓${NC}  $*"; }
+die()  { echo -e "\n${R}  ✗  ERROR:${NC} $*" >&2; exit 1; }
+step() { echo -e "\n${B}▶${NC}  $*"; }
+
+need_root() {
+  [[ $EUID -eq 0 ]] || exec sudo "$CTL_BIN" "$@"
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+
+  status)
+    systemctl status "$SERVICE" --no-pager -l
+    ;;
+
+  start)
+    need_root start
+    systemctl start "$SERVICE"
+    info "Started"
+    ;;
+
+  stop)
+    need_root stop
+    systemctl stop "$SERVICE"
+    info "Stopped"
+    ;;
+
+  restart)
+    need_root restart
+    systemctl restart "$SERVICE"
+    info "Restarted"
+    ;;
+
+  logs)
+    exec journalctl -u "$SERVICE" -f
+    ;;
+
+  update)
+    need_root update
+    [[ -d "$INSTALL_DIR/.git" ]] || die "Install directory not found: $INSTALL_DIR"
+    step "Pulling latest code..."
+    git -C "$INSTALL_DIR" pull
+    npm --prefix "$INSTALL_DIR" install --omit=dev --silent
+    # Refresh the control script in case it changed
+    if [[ -f "$INSTALL_DIR/nodewatch-ctl" ]]; then
+      cp "$INSTALL_DIR/nodewatch-ctl" "$CTL_BIN"
+      chmod +x "$CTL_BIN"
+    fi
+    systemctl restart "$SERVICE"
+    info "Updated and restarted"
+    ;;
+
+  configure)
+    need_root configure
+    [[ -f "$INSTALL_DIR/install.sh" ]] || die "Install directory not found: $INSTALL_DIR"
+    exec bash "$INSTALL_DIR/install.sh" --reconfigure
+    ;;
+
+  uninstall)
+    need_root uninstall
+    step "Uninstalling nodewatch..."
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+      systemctl stop "$SERVICE"
+      info "Service stopped"
+    fi
+    if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
+      systemctl disable "$SERVICE"
+      info "Service disabled"
+    fi
+    if [[ -f "$SERVICE_FILE" ]]; then
+      rm -f "$SERVICE_FILE"
+      systemctl daemon-reload
+      info "Service file removed"
+    fi
+    if [[ -d "$INSTALL_DIR" ]]; then
+      rm -rf "$INSTALL_DIR"
+      info "Removed $INSTALL_DIR"
+    fi
+    rm -f "$CTL_BIN"
+    info "Removed $CTL_BIN"
+    echo ""
+    echo -e "${G}  nodewatch has been uninstalled.${NC}"
+    echo ""
+    ;;
+
+  help|--help|-h|"")
+    echo ""
+    echo "  nodewatch — AllStar Node Monitor"
+    echo ""
+    echo "  Usage: nodewatch <command>"
+    echo ""
+    echo "  Commands:"
+    echo "    status      Show service status"
+    echo "    start       Start the service"
+    echo "    stop        Stop the service"
+    echo "    restart     Restart the service"
+    echo "    logs        Stream live logs  (Ctrl-C to exit)"
+    echo "    update      Pull latest code and restart"
+    echo "    configure   Re-read Asterisk config and rewrite config.toml"
+    echo "    uninstall   Remove nodewatch from this system"
+    echo ""
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    echo "Run 'nodewatch help' for usage."
+    exit 1
+    ;;
+
+esac

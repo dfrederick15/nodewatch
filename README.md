@@ -101,12 +101,19 @@ label   = "Node Status"
 command = "rpt xnode %node%"   # %node% is replaced with the local node number
 ```
 
-## Service management
+## Management
+
+After install, the `nodewatch` command is available system-wide:
 
 ```bash
-sudo systemctl status nodewatch
-sudo systemctl restart nodewatch
-sudo journalctl -u nodewatch -f   # live logs
+nodewatch status      # service status
+nodewatch start       # start
+nodewatch stop        # stop
+nodewatch restart     # restart
+nodewatch logs        # live log stream (Ctrl-C to exit)
+nodewatch update      # pull latest code and restart
+nodewatch configure   # re-read Asterisk config and rewrite config.toml
+nodewatch uninstall   # remove nodewatch from this system
 ```
 
 ## Remote node provisioning

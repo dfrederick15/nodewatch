@@ -59,6 +59,10 @@ if $UNINSTALL; then
     rm -rf "$INSTALL_DIR"
     info "Removed $INSTALL_DIR"
   fi
+  if [[ -f "/usr/local/bin/nodewatch" ]]; then
+    rm -f "/usr/local/bin/nodewatch"
+    info "Removed /usr/local/bin/nodewatch"
+  fi
   echo ""
   echo -e "${G}  nodewatch has been uninstalled.${NC}"
   echo ""
@@ -78,6 +82,8 @@ if $UPDATE_ONLY; then
   step "Pulling latest code..."
   git -C "$INSTALL_DIR" pull -q
   npm --prefix "$INSTALL_DIR" install --omit=dev --silent
+  cp "$INSTALL_DIR/nodewatch-ctl" "/usr/local/bin/nodewatch"
+  chmod +x "/usr/local/bin/nodewatch"
   systemctl restart "$SERVICE" 2>/dev/null || true
   info "Updated and restarted. Done."
   exit 0
@@ -394,7 +400,13 @@ else
   info "Service started"
 fi
 
-# ── 7. Done ───────────────────────────────────────────────────────────────────
+# ── 7. Install control script ─────────────────────────────────────────────────
+step "Installing nodewatch control script..."
+cp "$INSTALL_DIR/nodewatch-ctl" "/usr/local/bin/nodewatch"
+chmod +x "/usr/local/bin/nodewatch"
+info "Installed to /usr/local/bin/nodewatch"
+
+# ── 8. Done ───────────────────────────────────────────────────────────────────
 # Get local IP for display
 LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')
 
@@ -406,9 +418,7 @@ echo ""
 echo -e "  Web UI:   ${B}http://${LOCAL_IP}:${PORT}${NC}"
 echo ""
 echo -e "  Config:   ${INSTALL_DIR}/config.toml"
-echo -e "  Logs:     journalctl -u ${SERVICE} -f"
-echo -e "  Restart:  sudo systemctl restart ${SERVICE}"
-echo -e "  Update:   sudo bash install.sh --update"
+echo -e "  Manage:   nodewatch <status|restart|logs|update|configure|uninstall>"
 echo ""
 warn "Default login password is 'changeme' — update [auth] password in config.toml"
 echo ""
