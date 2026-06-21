@@ -430,7 +430,39 @@ else
   info "Service started"
 fi
 
-# ── 7. Install control script ─────────────────────────────────────────────────
+# ── 7. astdb update timer ────────────────────────────────────────────────────
+step "Setting up astdb update timer..."
+cat > "/etc/systemd/system/nodewatch-astdb.service" << 'EOF'
+[Unit]
+Description=Update AllStar node database (astdb.txt)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'curl -fsSL --max-time 30 "https://www.allstarlink.org/cgi-bin/allmondb.pl" -o /var/lib/asterisk/astdb.txt.tmp && mv /var/lib/asterisk/astdb.txt.tmp /var/lib/asterisk/astdb.txt'
+EOF
+
+cat > "/etc/systemd/system/nodewatch-astdb.timer" << 'EOF'
+[Unit]
+Description=Daily AllStar node database update
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=24h
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable nodewatch-astdb.timer >/dev/null 2>&1
+systemctl start nodewatch-astdb.timer
+# Run it now so the file is populated immediately
+systemctl start nodewatch-astdb.service 2>/dev/null || true
+info "astdb update timer installed and running"
+
+# ── 8. Install control script ─────────────────────────────────────────────────
 step "Installing nodewatch control script..."
 cp "$INSTALL_DIR/nodewatch-ctl" "/usr/local/bin/nodewatch"
 chmod +x "/usr/local/bin/nodewatch"
@@ -438,7 +470,7 @@ info "Installed to /usr/local/bin/nodewatch"
 
 # ── 8. Done ───────────────────────────────────────────────────────────────────
 # Get local IP for display
-LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')
+LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1);exit}}}' || hostname -I | awk '{print $1}')
 
 echo ""
 echo -e "${G}═══════════════════════════════════════════${NC}"

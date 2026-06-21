@@ -200,7 +200,6 @@ function serializeConfig(c: Config): string {
 
 const astdb = new Map<string, string>();
 const ASTDB_PATHS = [
-  "/var/www/html/allmon3/astdb.txt",
   "/var/lib/asterisk/astdb.txt",
 ];
 
