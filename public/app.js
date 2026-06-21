@@ -229,12 +229,12 @@ function startLiveTimer() {
   setInterval(() => {
     const now = Date.now();
     for (const [nodeNum, conns] of Object.entries(liveTimes)) {
-      conns.forEach((c, i) => {
+      conns.forEach((c) => {
         const delta = Math.floor((now - c.receivedAt) / 1000);
         const lk    = c.last_keyed === -1 ? -1 : c.last_keyed + delta;
         const el    = c.elapsed + delta;
-        const lkEl  = document.getElementById(`lkey-${nodeNum}-${i}`);
-        const elEl  = document.getElementById(`elap-${nodeNum}-${i}`);
+        const lkEl  = document.getElementById(`lkey-${nodeNum}-${c.node}`);
+        const elEl  = document.getElementById(`elap-${nodeNum}-${c.node}`);
         if (lkEl) lkEl.textContent = formatLastKeyed(lk);
         if (elEl) elEl.textContent = formatElapsed(el);
       });
@@ -332,10 +332,10 @@ function renderNodeTable(status) {
       </td>
       <td class="node-col">${escHtml(c.node)}</td>
       <td class="info-col">${escHtml(c.info || c.ip || "")}</td>
-      <td class="muted-col" id="lkey-${nodeNum}-${i}">${formatLastKeyed(c.last_keyed)}</td>
+      <td class="muted-col" id="lkey-${nodeNum}-${c.node}">${formatLastKeyed(c.last_keyed)}</td>
       <td class="muted-col">${escHtml(c.link)}</td>
       <td class="muted-col">${escHtml(c.direction)}</td>
-      <td class="muted-col" id="elap-${nodeNum}-${i}">${formatElapsed(c.elapsed)}</td>
+      <td class="muted-col" id="elap-${nodeNum}-${c.node}">${formatElapsed(c.elapsed)}</td>
       <td class="muted-col">${modeLabel(c.mode)}</td>
     </tr>`;
 
