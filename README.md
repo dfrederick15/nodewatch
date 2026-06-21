@@ -31,6 +31,12 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/dfrederick15/nodewa
 
 Then open `http://<node-ip>:8080` in a browser.
 
+**Install on a different port** (if 8080 is taken):
+
+```bash
+sudo bash install.sh --port 9090
+```
+
 **Update an existing install:**
 
 ```bash

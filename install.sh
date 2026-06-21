@@ -4,6 +4,7 @@
 # =============================================================================
 # Usage:
 #   sudo bash install.sh                  # fresh install
+#   sudo bash install.sh --port 9090      # fresh install on a custom port
 #   sudo bash install.sh --reconfigure    # re-read Asterisk config and rewrite config.toml
 #   sudo bash install.sh --update         # pull latest code, restart service
 # =============================================================================
@@ -16,9 +17,13 @@ PORT=8080
 RECONFIGURE=false
 UPDATE_ONLY=false
 
-for arg in "$@"; do
-  [[ "$arg" == "--reconfigure" ]] && RECONFIGURE=true
-  [[ "$arg" == "--update" ]]      && UPDATE_ONLY=true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)        PORT="${2:?'--port requires a value'}"; shift 2 ;;
+    --reconfigure) RECONFIGURE=true; shift ;;
+    --update)      UPDATE_ONLY=true; shift ;;
+    *) shift ;;
+  esac
 done
 
 # ── Output helpers ────────────────────────────────────────────────────────────
