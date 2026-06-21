@@ -167,10 +167,15 @@ export class AMIClient {
   private _readResponse(socket: net.Socket, actionID: string): Promise<string> {
     return new Promise((resolve, reject) => {
       let buffer = "";
-      let found = false;
+      let settled = false;
+
+      const cleanup = () => {
+        socket.removeListener("data", onData);
+        socket.removeListener("error", onError);
+      };
 
       const timer = setTimeout(() => {
-        socket.removeListener("data", onData);
+        cleanup();
         reject(new Error(`AMI read timeout waiting for ActionID: ${actionID}`));
       }, this.readTimeoutMs);
 
@@ -183,21 +188,23 @@ export class AMIClient {
 
         for (const packet of packets) {
           if (packet.includes(`ActionID: ${actionID}`)) {
-            found = true;
+            settled = true;
             clearTimeout(timer);
-            socket.removeListener("data", onData);
+            cleanup();
             resolve(packet);
             return;
           }
         }
       };
 
-      socket.on("data", onData);
-      socket.once("error", (err) => {
+      const onError = (err: Error) => {
         clearTimeout(timer);
-        socket.removeListener("data", onData);
-        if (!found) reject(err);
-      });
+        cleanup();
+        if (!settled) reject(err);
+      };
+
+      socket.on("data", onData);
+      socket.on("error", onError);
     });
   }
 
