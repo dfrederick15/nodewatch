@@ -35,10 +35,22 @@ function applyTheme(id) {
   const theme = THEMES.find(t => t.id === id) ?? THEMES[0];
   document.getElementById("theme-css").href = theme.file;
   localStorage.setItem("nodewatch-theme", theme.id);
+  const sel = document.getElementById("theme-select");
+  if (sel) sel.value = theme.id;
 }
 
 function initTheme() {
   const saved = localStorage.getItem("nodewatch-theme") ?? "amber";
+  const sel = document.getElementById("theme-select");
+  if (sel && sel.options.length === 0) {
+    THEMES.forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = t.id;
+      opt.textContent = t.id.charAt(0).toUpperCase() + t.id.slice(1);
+      sel.appendChild(opt);
+    });
+    sel.addEventListener("change", () => applyTheme(sel.value));
+  }
   applyTheme(saved);
 }
 
@@ -480,22 +492,6 @@ function renderSettings(cfg, area) {
     <button id="s-save-btn" class="primary">Save &amp; Apply</button>`;
   wrap.appendChild(topbar);
 
-  // ── Theme ──────────────────────────────────────────────────────────────────
-  const currentTheme = localStorage.getItem("nodewatch-theme") ?? "amber";
-  const themeOptions = THEMES.map(t =>
-    `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:6px">
-      <input type="radio" name="theme-pick" value="${escAttr(t.id)}" ${t.id === currentTheme ? "checked" : ""}
-        style="accent-color:var(--accent);width:14px;height:14px">
-      <span>${escHtml(t.label)}</span>
-    </label>`
-  ).join("");
-  const themeSection = settingsSection("Appearance / Theme", true,
-    `<div style="display:flex;flex-direction:column;gap:2px">${themeOptions}</div>`);
-  wrap.appendChild(themeSection);
-  themeSection.querySelectorAll("input[name='theme-pick']").forEach(radio => {
-    radio.addEventListener("change", () => applyTheme(radio.value));
-  });
-
   // ── Display ────────────────────────────────────────────────────────────────
   wrap.appendChild(settingsSection("Display", true, `
     <div class="settings-grid">
@@ -528,16 +524,41 @@ function renderSettings(cfg, area) {
   // ── Local Nodes ────────────────────────────────────────────────────────────
   const nodesBody = document.createElement("div");
   const nodesSection = settingsSection("Local Nodes", false, "");
-  nodesSection.querySelector(".settings-section-body").appendChild(nodesBody);
+  const nodesSectionBody = nodesSection.querySelector(".settings-section-body");
+
+  // Provision panel — auto-configure a remote AllStar node
+  const provPanel = document.createElement("div");
+  provPanel.className = "s-provision-panel";
+  provPanel.innerHTML = `
+    <div class="s-provision-header">Auto-Provision a Remote Node</div>
+    <p class="s-provision-desc">
+      Generate a one-time command to run on a remote AllStar server (via SSH).
+      It will configure the Asterisk Manager Interface, update the firewall, and
+      securely register the node here — no manual credential entry needed.
+    </p>
+    <button id="s-gen-prov-btn" class="primary" style="margin-bottom:8px">Generate Provision Command</button>
+    <div id="s-prov-result" style="display:none;margin-top:8px">
+      <div class="s-prov-cmd-label">Paste and run this command on the remote node (as root):</div>
+      <div class="s-prov-cmd-wrap">
+        <textarea id="s-prov-cmd" readonly rows="5" spellcheck="false"></textarea>
+        <button id="s-prov-copy-btn" style="margin-top:4px">Copy Command</button>
+      </div>
+      <div id="s-prov-expiry" class="s-provision-expiry"></div>
+    </div>
+    <div id="s-prov-msg" class="s-provision-msg"></div>`;
+  nodesSectionBody.appendChild(provPanel);
+  provPanel.querySelector("#s-gen-prov-btn").addEventListener("click", () => generateProvisionCommand(provPanel));
+
+  nodesSectionBody.appendChild(nodesBody);
   renderSettingsNodes(nodesBody, cfg.nodes ?? []);
   const addNodeBtn = document.createElement("button");
-  addNodeBtn.textContent = "+ Add Node";
+  addNodeBtn.textContent = "+ Add Node Manually";
   addNodeBtn.style.marginTop = "8px";
   addNodeBtn.addEventListener("click", () => {
     const blankNode = { node: 0, host: "127.0.0.1", user: "admin", password: "", label: "", private: false, stream_url: "", website_url: "" };
     nodesBody.appendChild(buildNodeCard(blankNode));
   });
-  nodesSection.querySelector(".settings-section-body").appendChild(addNodeBtn);
+  nodesSectionBody.appendChild(addNodeBtn);
   wrap.appendChild(nodesSection);
 
   // ── Commands ───────────────────────────────────────────────────────────────
@@ -655,7 +676,13 @@ function buildCommandRow(cmd) {
 
 async function saveSettings(originalCfg) {
   const msg = document.getElementById("s-save-msg");
+  if (!msg) { console.error("saveSettings: #s-save-msg not found"); return; }
   const setMsg = (text, cls) => { msg.textContent = text; msg.className = cls; };
+  try { await _saveSettingsInner(originalCfg, setMsg); }
+  catch (err) { setMsg(`Error: ${err.message}`, "error"); }
+}
+
+async function _saveSettingsInner(originalCfg, setMsg) {
 
   // Collect nodes
   const nodes = [];
@@ -733,6 +760,76 @@ async function saveSettings(originalCfg) {
     }, 800);
   } catch (_) {
     setMsg("Network error — could not reach server.", "error");
+  }
+}
+
+// ── Remote node provision ─────────────────────────────────────────────────────
+
+async function generateProvisionCommand(panel) {
+  const msg     = panel.querySelector("#s-prov-msg");
+  const btn     = panel.querySelector("#s-gen-prov-btn");
+  const result  = panel.querySelector("#s-prov-result");
+  const textarea = panel.querySelector("#s-prov-cmd");
+  const copyBtn = panel.querySelector("#s-prov-copy-btn");
+  const expiry  = panel.querySelector("#s-prov-expiry");
+
+  msg.textContent = "";
+  btn.disabled = true;
+  btn.textContent = "Generating…";
+
+  try {
+    const res = await fetch("/api/provision/token");
+    if (!res.ok) { msg.textContent = "Failed to get token — are you logged in?"; btn.disabled = false; btn.textContent = "Generate Provision Command"; return; }
+    const d = await res.json();
+
+    const cmd =
+      `sudo env \\\n` +
+      `  NODEWATCH_URL='${d.server_url}' \\\n` +
+      `  TOKEN_ID='${d.token_id}' \\\n` +
+      `  KEY_HEX='${d.key_hex}' \\\n` +
+      `  IV_HEX='${d.iv_hex}' \\\n` +
+      `  bash <(curl -sfL '${d.server_url}/api/provision/script')`;
+
+    textarea.value = cmd;
+    result.style.display = "block";
+    btn.textContent = "Regenerate";
+    btn.disabled = false;
+
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(cmd).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy Command"; }, 2000);
+      }).catch(() => {
+        textarea.select(); document.execCommand("copy");
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy Command"; }, 2000);
+      });
+    };
+
+    // Countdown
+    let remaining = d.expires_in ?? 600;
+    let countdownTimer = null;
+    const tick = () => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(countdownTimer);
+        expiry.textContent = "Expired. Click Regenerate for a new command.";
+        expiry.style.color = "var(--red)";
+        result.style.display = "none";
+        return;
+      }
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      expiry.textContent = `Token expires in ${m}:${String(s).padStart(2, "0")} — use it before it expires`;
+      expiry.style.color = "";
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+
+  } catch (err) {
+    msg.textContent = `Error: ${err.message}`;
+    btn.disabled = false;
+    btn.textContent = "Generate Provision Command";
   }
 }
 

@@ -170,6 +170,13 @@ input:focus, select:focus, textarea:focus {
 }
 select { cursor: pointer; }
 
+/* Theme switcher in header — override full-width default */
+#theme-select {
+  width: auto;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;
@@ -515,6 +522,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 #s-save-msg.ok    { background: #1a2a1a; color: var(--green); display: inline-block; }
 #s-save-msg.error { background: #2a1a1a; color: var(--red);   display: inline-block; }
 #s-save-msg.info  { background: #1a1e2a; color: #93c5fd;      display: inline-block; }
+
+/* ── Provision panel ─────────────────────────────────────────────────── */
+.s-provision-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; }
+.s-provision-header { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 6px; }
+.s-provision-desc { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 10px; }
+.s-prov-cmd-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; font-family: var(--mono); }
+.s-prov-cmd-wrap textarea { width: 100%; background: #0e1117; border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 11px; padding: 8px 10px; resize: vertical; line-height: 1.6; border-radius: var(--radius); }
+.s-provision-expiry { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 4px; }
+.s-provision-msg { font-size: 12px; color: var(--red); margin-top: 4px; }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 700px) {

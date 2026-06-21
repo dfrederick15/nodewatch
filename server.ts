@@ -318,6 +318,26 @@ function sessionFromReq(req: http.IncomingMessage): Session | null {
   return getSession(parseCookies(req.headers.cookie)["asl_session"]);
 }
 
+// ── Provision token store ─────────────────────────────────────────────────────
+// One-time tokens for the remote node auto-provisioning flow.
+// Each token holds an AES-256-CBC key+IV; expires in 10 minutes and can only
+// be used once. The remote node script encrypts credentials with the key and
+// POSTs them to /api/provision/register for decryption and config save.
+
+interface ProvisionToken { keyHex: string; ivHex: string; expiresAt: number; used: boolean; }
+const provisionTokens = new Map<string, ProvisionToken>();
+
+function newProvisionToken(): { tokenId: string; keyHex: string; ivHex: string } {
+  const tokenId = crypto.randomUUID();
+  const keyHex  = crypto.randomBytes(32).toString("hex");
+  const ivHex   = crypto.randomBytes(16).toString("hex");
+  provisionTokens.set(tokenId, { keyHex, ivHex, expiresAt: Date.now() + 10 * 60_000, used: false });
+  for (const [k, v] of provisionTokens) {
+    if (v.expiresAt < Date.now()) provisionTokens.delete(k);
+  }
+  return { tokenId, keyHex, ivHex };
+}
+
 // ── AMI connection pool ───────────────────────────────────────────────────────
 
 interface HostConn {
@@ -517,6 +537,66 @@ const server = http.createServer(async (req, res) => {
   if (pathname === "/api/session") {
     const s = sessionFromReq(req);
     json(res, 200, { logged_in: !!s, username: s?.username ?? null });
+    return;
+  }
+
+  // GET /api/provision/token — generate a one-time AES key for remote provisioning
+  if (pathname === "/api/provision/token" && req.method === "GET") {
+    if (!requireAuth(req, res)) return;
+    const { tokenId, keyHex, ivHex } = newProvisionToken();
+    const host      = req.headers.host ?? `localhost:${cfg.server.port}`;
+    const proto     = (req.headers["x-forwarded-proto"] as string | undefined) ?? "http";
+    const serverUrl = `${proto}://${host}`;
+    json(res, 200, { token_id: tokenId, key_hex: keyHex, iv_hex: ivHex, server_url: serverUrl, expires_in: 600 });
+    return;
+  }
+
+  // GET /api/provision/script — serve the bash provisioning script (public)
+  if (pathname === "/api/provision/script" && req.method === "GET") {
+    const scriptPath = new URL("./provision.sh", import.meta.url).pathname;
+    try {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(fs.readFileSync(scriptPath, "utf8"));
+    } catch (_) { res.writeHead(404); res.end("Not found"); }
+    return;
+  }
+
+  // POST /api/provision/register — decrypt node credentials and add to config
+  if (pathname === "/api/provision/register" && req.method === "POST") {
+    const body  = await readBody(req) as unknown as { token_id: string; payload: string };
+    const token = body?.token_id ? provisionTokens.get(body.token_id) : undefined;
+    if (!token || token.used || Date.now() > token.expiresAt) {
+      if (token) provisionTokens.delete(body.token_id);
+      json(res, 401, { error: "Invalid, expired, or already-used token" }); return;
+    }
+    try {
+      const key   = Buffer.from(token.keyHex, "hex");
+      const iv    = Buffer.from(token.ivHex,  "hex");
+      const enc   = Buffer.from(body.payload,  "base64");
+      const dec   = crypto.createDecipheriv("aes-256-cbc", key, iv);
+      const plain = Buffer.concat([dec.update(enc), dec.final()]);
+      const data  = JSON.parse(plain.toString("utf8")) as { nodes: NodeConfig[]; token_id: string };
+      token.used = true;
+      if (!Array.isArray(data.nodes) || data.nodes.length === 0) {
+        json(res, 400, { error: "No nodes in payload" }); return;
+      }
+      let added = 0;
+      for (const n of data.nodes) {
+        const num = Number(n.node);
+        if (!num || !n.host || !n.user || !n.password) continue;
+        if (cfg.nodes.find(x => x.node === num)) continue;
+        cfg.nodes.push({ node: num, host: n.host, user: n.user, password: n.password,
+          label: n.label ?? "", private: false, stream_url: "", website_url: "" });
+        added++;
+      }
+      if (fs.existsSync(configPath)) fs.copyFileSync(configPath, configPath + ".bak");
+      fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
+      console.log(`Provision: added ${added} node(s) via remote script`);
+      json(res, 200, { ok: true, message: `${added} node(s) added. Server restarting…`, added });
+      if (added > 0) setTimeout(() => process.exit(0), 500);
+    } catch (err) {
+      json(res, 400, { error: `Processing failed: ${(err as Error).message}` });
+    }
     return;
   }
 
