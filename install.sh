@@ -113,16 +113,28 @@ mapfile -t NODE_NUMS < <(awk '
 [[ ${#NODE_NUMS[@]} -gt 0 ]] || die "No local node numbers found in $RPT_CONF — check the [nodes] section"
 info "Found node(s): ${NODE_NUMS[*]}"
 
-# AMI user: first stanza name that isn't [general]
-AMI_USER=$(grep -oP '(?<=^\[)[^\]]+' "$MGR_CONF" | grep -v '^general$' | head -1)
+# AMI user: first stanza that isn't [general] (handles tabs, spaces, CR+LF)
+AMI_USER=$(awk '
+  /^[[:space:]]*;/ { next }
+  /^\[/ {
+    name=$0; gsub(/[\[\][:space:]\r]/, "", name)
+    if (name != "" && name != "general") { print name; exit }
+  }
+' "$MGR_CONF")
 [[ -n "$AMI_USER" ]] || die "No AMI user stanza found in $MGR_CONF"
 
-# AMI password: secret = value from that stanza
+# AMI password: handles tabs/spaces around =, CR+LF line endings, and
+# both 'secret' and 'password' key names
 AMI_PASS=$(awk -v u="$AMI_USER" '
-  /^\[/ { gsub(/[\[\]]/,"",$0); cur=$0 }
-  cur==u && /^secret *=/ { gsub(/ /,"",$0); sub(/^secret=/,""); print; exit }
+  /^[[:space:]]*;/ { next }
+  /^\[/ { name=$0; gsub(/[\[\][:space:]\r]/, "", name); cur=name }
+  cur == u && /^[[:space:]]*(secret|password)[[:space:]]*=/ {
+    sub(/^[[:space:]]*(secret|password)[[:space:]]*=[[:space:]]*/, "")
+    gsub(/[[:space:]\r]*$/, "")
+    print; exit
+  }
 ' "$MGR_CONF")
-[[ -n "$AMI_PASS" ]] || die "No 'secret' found for [$AMI_USER] in $MGR_CONF"
+[[ -n "$AMI_PASS" ]] || die "No secret/password found for [$AMI_USER] in $MGR_CONF"
 info "AMI credentials: user=$AMI_USER"
 
 # Callsign: try common AllStar env files, then fall back to MYCALL
