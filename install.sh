@@ -213,7 +213,7 @@ fi
 if [[ "$CALLSIGN" == "MYCALL" ]] && command -v curl &>/dev/null; then
   first_node="${NODE_NUMS[0]}"
   cs=$(curl -sf --max-time 8 "https://stats.allstarlink.org/api/stats/${first_node}" 2>/dev/null \
-    | grep -oP '"callsign"\s*:\s*"\K[^"]+' | head -1 || true)
+    | awk -F'"' '/"callsign"/{for(i=1;i<=NF;i++){if($i=="callsign"){print $(i+2);exit}}}' || true)
   [[ -n "$cs" ]] && CALLSIGN="$cs" && info "Callsign from AllStar registry: $cs"
 fi
 
