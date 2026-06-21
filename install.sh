@@ -228,6 +228,15 @@ timezone = "America/New_York"
 
 
 # -----------------------------------------------------------------------------
+[favorites]
+# -----------------------------------------------------------------------------
+# Add node numbers here to track them in the Favorites tab.
+# Separate multiple nodes with commas: nodes = [27339, 12345]
+
+nodes = []
+
+
+# -----------------------------------------------------------------------------
 # [[nodes]] — one block per local AllStar node
 # -----------------------------------------------------------------------------
 # Copy this block to add more nodes.

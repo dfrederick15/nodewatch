@@ -3,27 +3,24 @@
  *
  * No external dependencies. Runs in any modern browser.
  *
- * Flow:
- *  1. Fetch /api/config — display settings, node list, command list.
- *  2. Fetch /api/session — check if already logged in.
- *  3. Open SSE to /api/sse — receive real-time node_status and node_times events.
- *  4. Render a table per node; clicking a row populates the control form.
- *  5. A local setInterval ticks elapsed/last-keyed counters every second
- *     so they increment smoothly without waiting for the next server poll.
- *  6. Connected remote nodes with subnodes show a ▶ expand button.
+ * Tabs:
+ *  Home      — Live node status panels from SSE; connect/disconnect controls.
+ *  Favorites — Polls /api/favorites/status every 30 s; shows network-wide status
+ *              for saved nodes. Add/remove nodes (auth required).
+ *  Settings  — Full config.toml editor. Saves to server and triggers a restart.
  */
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let config = null;
+let config = null;       // from /api/config
 let loggedIn = false;
+let currentTab = "home";
 
-// Live counter state: nodeNum → [ {elapsed, last_keyed, receivedAt}, ... ]
-// Updated on every node_times SSE event; ticked client-side every second.
+// Live counter state per local node: nodeNum → [{node,elapsed,last_keyed,receivedAt}]
 const liveTimes = {};
 
-// Which rows are currently expanded to show subnodes
-const expandedRows = new Set(); // keys like "65659-27339"
+// Expanded subnode rows: "localNode-remoteNode"
+const expandedRows = new Set();
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -34,6 +31,7 @@ async function boot() {
   startLiveTimer();
   wireButtons();
   wireLoginDialog();
+  wireTabs();
 }
 
 async function loadConfig() {
@@ -44,7 +42,6 @@ async function loadConfig() {
   document.getElementById("hdr-subtitle").textContent = config.display.title;
   document.title = config.display.title;
 
-  // Populate local node selector
   const sel = document.getElementById("local-node");
   sel.innerHTML = "";
   for (const n of config.nodes) {
@@ -54,7 +51,6 @@ async function loadConfig() {
     sel.appendChild(opt);
   }
 
-  // Populate command dropdown
   const cmdSel = document.getElementById("cmd-select");
   cmdSel.innerHTML = "";
   for (const cmd of config.commands) {
@@ -64,7 +60,6 @@ async function loadConfig() {
     cmdSel.appendChild(opt);
   }
 
-  // Build empty node panels
   const area = document.getElementById("nodes-area");
   area.innerHTML = "";
   for (const n of config.nodes) area.appendChild(buildNodePanel(n));
@@ -76,7 +71,29 @@ async function checkSession() {
   setLoggedIn(data.logged_in, data.username);
 }
 
-// ── SSE ───────────────────────────────────────────────────────────────────────
+// ── Tab routing ───────────────────────────────────────────────────────────────
+
+function wireTabs() {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+}
+
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll(".tab-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(p =>
+    p.classList.toggle("active", p.id === `tab-${name}`));
+
+  const wide = name !== "home";
+  document.getElementById("main-layout").classList.toggle("wide", wide);
+
+  if (name === "favorites") loadFavorites();
+  if (name === "settings")  loadSettings();
+}
+
+// ── SSE (Home tab) ────────────────────────────────────────────────────────────
 
 let sseSource = null;
 const spinChars = ["|", "/", "-", "\\"];
@@ -88,15 +105,13 @@ function connectSSE() {
   sseSource = new EventSource(`/api/sse?nodes=${nodeNums}`);
 
   sseSource.addEventListener("node_status", (e) => {
-    const status = JSON.parse(e.data);
-    renderNodeTable(status.node, status);
+    renderNodeTable(JSON.parse(e.data));
     setStatusDot("connected");
     tick();
   });
 
   sseSource.addEventListener("node_times", (e) => {
     const data = JSON.parse(e.data);
-    // Store received values with timestamp so the live timer can tick them
     liveTimes[data.node] = (data.connections ?? []).map(c => ({
       node:        c.node,
       elapsed:     c.elapsed,
@@ -120,8 +135,6 @@ function tick() {
 }
 
 // ── Live counter timer ────────────────────────────────────────────────────────
-// Increments elapsed and last_keyed counters locally every second so they
-// tick smoothly between server polls instead of jumping all at once.
 
 function startLiveTimer() {
   setInterval(() => {
@@ -129,11 +142,10 @@ function startLiveTimer() {
     for (const [nodeNum, conns] of Object.entries(liveTimes)) {
       conns.forEach((c, i) => {
         const delta = Math.floor((now - c.receivedAt) / 1000);
-        const lk = c.last_keyed === -1 ? -1 : c.last_keyed + delta;
-        const el = c.elapsed + delta;
-
-        const lkEl = document.getElementById(`lkey-${nodeNum}-${i}`);
-        const elEl = document.getElementById(`elap-${nodeNum}-${i}`);
+        const lk    = c.last_keyed === -1 ? -1 : c.last_keyed + delta;
+        const el    = c.elapsed + delta;
+        const lkEl  = document.getElementById(`lkey-${nodeNum}-${i}`);
+        const elEl  = document.getElementById(`elap-${nodeNum}-${i}`);
         if (lkEl) lkEl.textContent = formatLastKeyed(lk);
         if (elEl) elEl.textContent = formatElapsed(el);
       });
@@ -141,7 +153,7 @@ function startLiveTimer() {
   }, 1000);
 }
 
-// ── Node panel rendering ──────────────────────────────────────────────────────
+// ── Home tab: node panel rendering ───────────────────────────────────────────
 
 function buildNodePanel(nodeCfg) {
   const panel = document.createElement("div");
@@ -159,11 +171,11 @@ function buildNodePanel(nodeCfg) {
   return panel;
 }
 
-function renderNodeTable(nodeNum, status) {
+function renderNodeTable(status) {
+  const { node: nodeNum } = status;
   const wrap = document.getElementById(`table-wrap-${nodeNum}`);
   if (!wrap) return;
 
-  // Update state badge
   const badge = document.getElementById(`badge-${nodeNum}`);
   if (badge) {
     const { cos_keyed, tx_keyed } = status;
@@ -178,7 +190,6 @@ function renderNodeTable(nodeNum, status) {
     }
   }
 
-  // Filter and sort connections
   let conns = status.connections.filter(c => c.node !== "1");
   if (!config.display.show_never_heard) conns = conns.filter(c => c.last_keyed !== -1);
   if (config.display.max_nodes > 0) conns = conns.slice(0, config.display.max_nodes);
@@ -202,12 +213,11 @@ function renderNodeTable(nodeNum, status) {
           <th>Node</th><th>Info</th><th>Last Heard</th>
           <th>Link</th><th>Dir</th><th>Connected</th><th>Mode</th>
         </tr>
-      </thead>
-      <tbody>`;
+      </thead><tbody>`;
 
   for (let i = 0; i < conns.length; i++) {
-    const c     = conns[i];
-    const rowKey  = `${nodeNum}-${c.node}`;
+    const c = conns[i];
+    const rowKey = `${nodeNum}-${c.node}`;
     const hasSubnodes = Array.isArray(c.subnodes) && c.subnodes.length > 0;
     const isExpanded  = expandedRows.has(rowKey);
     const rowClass    = c.keyed ? "keyed" : c.link === "CONNECTING" ? "connecting" : "";
@@ -215,7 +225,7 @@ function renderNodeTable(nodeNum, status) {
     html += `<tr class="${rowClass}" data-node="${escAttr(c.node)}" data-local="${escAttr(nodeNum)}">
       <td class="expand-cell">
         ${hasSubnodes
-          ? `<button class="expand-btn" data-key="${escAttr(rowKey)}" title="${c.subnodes.length} node(s) connected to ${c.node}">${isExpanded ? "▼" : "▶"}</button>`
+          ? `<button class="expand-btn" data-key="${escAttr(rowKey)}">${isExpanded ? "▼" : "▶"}</button>`
           : ""}
       </td>
       <td class="node-col">${escHtml(c.node)}</td>
@@ -227,7 +237,6 @@ function renderNodeTable(nodeNum, status) {
       <td class="muted-col">${modeLabel(c.mode)}</td>
     </tr>`;
 
-    // Subnode rows (hidden unless expanded)
     if (hasSubnodes) {
       for (const sub of c.subnodes) {
         html += `<tr class="subnode-row${isExpanded ? "" : " subnode-hidden"}" data-parent="${escAttr(rowKey)}">
@@ -242,31 +251,22 @@ function renderNodeTable(nodeNum, status) {
   html += `</tbody></table>`;
   wrap.innerHTML = html;
 
-  // Click on a data row → populate the control form
   wrap.querySelectorAll("tr[data-node]").forEach(row => {
     row.addEventListener("click", (e) => {
-      if (e.target.closest(".expand-btn")) return; // don't hijack expand button
+      if (e.target.closest(".expand-btn")) return;
       document.getElementById("remote-input").value = row.dataset.node;
       document.getElementById("local-node").value   = row.dataset.local;
     });
   });
 
-  // Expand/collapse buttons
   wrap.querySelectorAll(".expand-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const key = btn.dataset.key;
-      if (expandedRows.has(key)) {
-        expandedRows.delete(key);
-        btn.textContent = "▶";
-      } else {
-        expandedRows.add(key);
-        btn.textContent = "▼";
-      }
-      // Toggle visibility of matching subnode rows
-      wrap.querySelectorAll(`.subnode-row[data-parent="${CSS.escape(key)}"]`).forEach(row => {
-        row.classList.toggle("subnode-hidden");
-      });
+      if (expandedRows.has(key)) { expandedRows.delete(key); btn.textContent = "▶"; }
+      else                        { expandedRows.add(key);    btn.textContent = "▼"; }
+      wrap.querySelectorAll(`.subnode-row[data-parent="${CSS.escape(key)}"]`).forEach(row =>
+        row.classList.toggle("subnode-hidden"));
     });
   });
 }
@@ -276,35 +276,383 @@ function showNodeError(nodeNum, msg) {
   if (wrap) wrap.innerHTML = `<div class="no-connections" style="color:var(--red)">${escHtml(msg)}</div>`;
 }
 
-// ── Formatting ─────────────────────────────────────────────────────────────────
+// ── Favorites tab ─────────────────────────────────────────────────────────────
 
-function formatLastKeyed(secs) {
-  if (secs == null || secs === -1) return "Never";
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return `${pad3(h)}:${pad2(m)}:${pad2(s)}`;
+let favPollTimer = null;
+
+async function loadFavorites() {
+  const area = document.getElementById("favorites-area");
+  area.innerHTML = `<div class="fav-toolbar">
+    <h2>Favorite Nodes</h2>
+    ${loggedIn ? `<div class="fav-add-row">
+      <input type="text" id="fav-add-input" placeholder="Node number" style="width:120px">
+      <button id="fav-add-btn" class="primary">+ Add</button>
+    </div>` : ""}
+    <button id="fav-refresh-btn">↻ Refresh</button>
+  </div>
+  <div id="fav-status-msg" style="color:var(--muted);font-size:12px;padding-bottom:4px"></div>
+  <div id="fav-table-wrap"></div>`;
+
+  document.getElementById("fav-refresh-btn").addEventListener("click", pollFavorites);
+  if (loggedIn) {
+    document.getElementById("fav-add-btn").addEventListener("click", addFavorite);
+    document.getElementById("fav-add-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") addFavorite();
+    });
+  }
+
+  await pollFavorites();
+
+  // Refresh every 30 s while on this tab
+  clearInterval(favPollTimer);
+  favPollTimer = setInterval(() => {
+    if (currentTab === "favorites") pollFavorites();
+  }, 30_000);
 }
 
-function formatElapsed(secs) {
-  if (secs == null || secs === 0) return "";
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return h > 0 ? `${h}h ${pad2(m)}m` : m > 0 ? `${m}m ${pad2(s)}s` : `${s}s`;
+async function pollFavorites() {
+  const msg = document.getElementById("fav-status-msg");
+  if (msg) msg.textContent = "Refreshing…";
+  try {
+    const res = await fetch("/api/favorites/status");
+    const rows = await res.json();
+    if (msg) msg.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    renderFavoritesTable(rows);
+  } catch (_) {
+    if (msg) msg.textContent = "Could not reach server.";
+  }
 }
 
-function modeLabel(mode) {
-  return { T: "Transceive", R: "Receive Only", M: "Monitor", C: "Connecting" }[mode] ?? mode ?? "";
+function renderFavoritesTable(rows) {
+  const wrap = document.getElementById("fav-table-wrap");
+  if (!wrap) return;
+
+  if (!rows || rows.length === 0) {
+    wrap.innerHTML = `<div class="no-connections" style="padding:24px">
+      No favorite nodes yet. ${loggedIn ? "Use the Add field above to add node numbers." : "Log in to add nodes."}
+    </div>`;
+    return;
+  }
+
+  let html = `<table class="fav-table">
+    <thead><tr>
+      <th>Node</th><th>Info</th><th>Status</th>
+      <th>Connections</th><th>Connected To</th>
+      ${loggedIn ? "<th></th>" : ""}
+    </tr></thead><tbody>`;
+
+  for (const r of rows) {
+    const statusClass = r.keyed ? "keyed" : r.status;
+    const statusLabel = r.keyed ? "Keyed" : r.status === "online" ? "Online" : "Offline";
+    const chips = (r.connections ?? []).map(c =>
+      `<span class="fav-conn-chip"><span>${escHtml(c.node)}</span>${c.info ? " " + escHtml(c.info) : ""}</span>`
+    ).join("");
+
+    html += `<tr>
+      <td class="node-col">${escHtml(r.node)}</td>
+      <td class="info-col">${escHtml(r.info || "")}</td>
+      <td><span class="fav-status ${statusClass}">${statusLabel}</span></td>
+      <td class="muted-col">${r.connection_count}</td>
+      <td><div class="fav-conn-list">${chips || '<span class="fav-conns">—</span>'}</div></td>
+      ${loggedIn ? `<td><button class="danger fav-remove-btn" data-node="${escAttr(r.node)}" style="padding:3px 8px;font-size:11px">Remove</button></td>` : ""}
+    </tr>`;
+  }
+
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+
+  if (loggedIn) {
+    wrap.querySelectorAll(".fav-remove-btn").forEach(btn => {
+      btn.addEventListener("click", () => removeFavorite(btn.dataset.node));
+    });
+  }
 }
 
-function pad2(n) { return String(n).padStart(2, "0"); }
-function pad3(n) { return String(n).padStart(3, "0"); }
-function escHtml(s) {
-  return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+async function addFavorite() {
+  const input = document.getElementById("fav-add-input");
+  const node  = parseInt(input.value.trim());
+  if (isNaN(node)) return;
+  input.value = "";
+  await apiPost("/api/favorites/add", { node });
+  await pollFavorites();
 }
-function escAttr(s) {
-  return String(s ?? "").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+async function removeFavorite(node) {
+  await apiPost("/api/favorites/remove", { node: parseInt(node) });
+  await pollFavorites();
+}
+
+// ── Settings tab ──────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+  const area = document.getElementById("settings-area");
+  if (!loggedIn) {
+    area.innerHTML = `<div style="padding:24px;color:var(--muted);font-size:13px">Log in to access settings.</div>`;
+    return;
+  }
+
+  area.innerHTML = `<div style="padding:24px;color:var(--muted);font-size:13px">Loading…</div>`;
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) { area.innerHTML = `<div style="padding:24px;color:var(--red)">Failed to load settings.</div>`; return; }
+    const cfg = await res.json();
+    renderSettings(cfg, area);
+  } catch (_) {
+    area.innerHTML = `<div style="padding:24px;color:var(--red)">Could not reach server.</div>`;
+  }
+}
+
+function renderSettings(cfg, area) {
+  const wrap = document.createElement("div");
+  wrap.className = "settings-wrap";
+
+  // ── Top bar ────────────────────────────────────────────────────────────────
+  const topbar = document.createElement("div");
+  topbar.className = "settings-topbar";
+  topbar.innerHTML = `
+    <h2>Settings</h2>
+    <span id="s-save-msg"></span>
+    <button id="s-save-btn" class="primary">Save &amp; Apply</button>`;
+  wrap.appendChild(topbar);
+
+  // ── Display ────────────────────────────────────────────────────────────────
+  wrap.appendChild(settingsSection("Display", true, `
+    <div class="settings-grid">
+      <label>Callsign</label>
+      <input id="s-callsign" type="text" value="${escAttr(cfg.display.callsign)}">
+      <label>Page Title</label>
+      <input id="s-title" type="text" value="${escAttr(cfg.display.title)}">
+      <label>Location</label>
+      <input id="s-location" type="text" value="${escAttr(cfg.display.location ?? '')}">
+      <label>Timezone</label>
+      <input id="s-tz" type="text" value="${escAttr(cfg.display.timezone ?? 'America/New_York')}">
+      <div class="settings-hint">IANA zone, e.g. America/Chicago · America/Los_Angeles · UTC</div>
+      <label>Max nodes <span style="font-size:10px">(0 = all)</span></label>
+      <input id="s-maxnodes" type="number" min="0" value="${cfg.display.max_nodes ?? 0}">
+      <label>Show "Never Heard"</label>
+      <input id="s-shownever" type="checkbox" ${cfg.display.show_never_heard ? "checked" : ""}>
+    </div>`));
+
+  // ── Authentication ─────────────────────────────────────────────────────────
+  wrap.appendChild(settingsSection("Authentication", false, `
+    <div class="settings-grid">
+      <label>Username</label>
+      <input id="s-auth-user" type="text" value="${escAttr(cfg.auth.username)}">
+      <label>Password</label>
+      <input id="s-auth-pass" type="password" value="${escAttr(cfg.auth.password)}">
+      <label>Session timeout (seconds)</label>
+      <input id="s-session-timeout" type="number" min="60" value="${cfg.auth.session_timeout_s}">
+    </div>`));
+
+  // ── Local Nodes ────────────────────────────────────────────────────────────
+  const nodesBody = document.createElement("div");
+  const nodesSection = settingsSection("Local Nodes", false, "");
+  nodesSection.querySelector(".settings-section-body").appendChild(nodesBody);
+  renderSettingsNodes(nodesBody, cfg.nodes ?? []);
+  const addNodeBtn = document.createElement("button");
+  addNodeBtn.textContent = "+ Add Node";
+  addNodeBtn.style.marginTop = "8px";
+  addNodeBtn.addEventListener("click", () => {
+    const blankNode = { node: 0, host: "127.0.0.1", user: "admin", password: "", label: "", private: false, stream_url: "", website_url: "" };
+    nodesBody.appendChild(buildNodeCard(blankNode));
+  });
+  nodesSection.querySelector(".settings-section-body").appendChild(addNodeBtn);
+  wrap.appendChild(nodesSection);
+
+  // ── Commands ───────────────────────────────────────────────────────────────
+  const cmdsBody = document.createElement("div");
+  const cmdsSection = settingsSection("Commands", false, "");
+  cmdsSection.querySelector(".settings-section-body").appendChild(cmdsBody);
+  renderSettingsCommands(cmdsBody, cfg.commands ?? []);
+  const addCmdBtn = document.createElement("button");
+  addCmdBtn.textContent = "+ Add Command";
+  addCmdBtn.style.marginTop = "8px";
+  addCmdBtn.addEventListener("click", () => cmdsBody.appendChild(buildCommandRow({ label: "", command: "" })));
+  cmdsSection.querySelector(".settings-section-body").appendChild(addCmdBtn);
+  wrap.appendChild(cmdsSection);
+
+  // ── Server (Advanced) ──────────────────────────────────────────────────────
+  wrap.appendChild(settingsSection("Server (Advanced)", false, `
+    <div class="settings-grid">
+      <label>Port</label>
+      <input id="s-port" type="number" min="1" max="65535" value="${cfg.server.port}">
+      <div class="settings-hint">Changing the port requires a browser reload to the new address after save.</div>
+      <label>Bind host</label>
+      <input id="s-host" type="text" value="${escAttr(cfg.server.host)}">
+      <div class="settings-hint">0.0.0.0 = all interfaces &nbsp;·&nbsp; 127.0.0.1 = local only</div>
+      <label>Poll interval (ms)</label>
+      <input id="s-poll" type="number" min="500" value="${cfg.server.poll_interval_ms}">
+      <label>AMI connect timeout (s)</label>
+      <input id="s-ami-connect" type="number" min="1" value="${cfg.server.ami_connect_timeout_s}">
+      <label>AMI read timeout (s)</label>
+      <input id="s-ami-read" type="number" min="1" value="${cfg.server.ami_read_timeout_s}">
+    </div>`));
+
+  area.innerHTML = "";
+  area.appendChild(wrap);
+
+  // Wire collapsible sections
+  wrap.querySelectorAll(".settings-section-header").forEach(hdr => {
+    hdr.addEventListener("click", () => {
+      const body = hdr.nextElementSibling;
+      body.classList.toggle("collapsed");
+      hdr.querySelector(".toggle-icon").textContent = body.classList.contains("collapsed") ? "▶" : "▼";
+    });
+  });
+
+  document.getElementById("s-save-btn").addEventListener("click", () => saveSettings(cfg));
+}
+
+function settingsSection(title, expanded, bodyHtml) {
+  const section = document.createElement("div");
+  section.className = "settings-section";
+  section.innerHTML = `
+    <div class="settings-section-header">
+      ${escHtml(title)}
+      <span class="toggle-icon">${expanded ? "▼" : "▶"}</span>
+    </div>
+    <div class="settings-section-body${expanded ? "" : " collapsed"}">${bodyHtml}</div>`;
+  return section;
+}
+
+function renderSettingsNodes(container, nodes) {
+  container.innerHTML = "";
+  nodes.forEach(n => container.appendChild(buildNodeCard(n)));
+}
+
+function buildNodeCard(n) {
+  const card = document.createElement("div");
+  card.className = "s-node-card";
+  card.innerHTML = `
+    <div class="s-node-card-header">
+      <span class="s-node-card-title">Node ${n.node || "New"}</span>
+      <span class="spacer"></span>
+      <button class="danger s-remove-node" style="padding:3px 8px;font-size:11px">Remove</button>
+    </div>
+    <div class="settings-grid">
+      <label>Node Number</label>
+      <input class="s-node-num" type="number" value="${n.node || ""}">
+      <label>Host</label>
+      <input class="s-node-host" type="text" value="${escAttr(n.host || "127.0.0.1")}">
+      <div class="settings-hint">IP of the Asterisk server. Custom port: 192.168.1.10:5038</div>
+      <label>AMI Username</label>
+      <input class="s-node-user" type="text" value="${escAttr(n.user || "")}">
+      <label>AMI Password</label>
+      <input class="s-node-pass" type="password" value="${escAttr(n.password || "")}">
+      <label>Label <span style="font-size:10px">(optional)</span></label>
+      <input class="s-node-label" type="text" value="${escAttr(n.label || "")}">
+      <label>Private</label>
+      <input class="s-node-private" type="checkbox" ${n.private ? "checked" : ""}>
+      <label>Stream URL <span style="font-size:10px">(optional)</span></label>
+      <input class="s-node-stream" type="text" value="${escAttr(n.stream_url || "")}">
+      <label>Website URL <span style="font-size:10px">(optional)</span></label>
+      <input class="s-node-website" type="text" value="${escAttr(n.website_url || "")}">
+    </div>`;
+
+  card.querySelector(".s-remove-node").addEventListener("click", () => card.remove());
+  card.querySelector(".s-node-num").addEventListener("input", (e) => {
+    card.querySelector(".s-node-card-title").textContent = `Node ${e.target.value || "New"}`;
+  });
+  return card;
+}
+
+function renderSettingsCommands(container, commands) {
+  container.innerHTML = "";
+  commands.forEach(cmd => container.appendChild(buildCommandRow(cmd)));
+}
+
+function buildCommandRow(cmd) {
+  const row = document.createElement("div");
+  row.className = "s-cmd-row";
+  row.innerHTML = `
+    <input type="text" class="s-cmd-label" placeholder="Label" value="${escAttr(cmd.label)}">
+    <input type="text" class="s-cmd-command" placeholder="command (use %node% for node number)" value="${escAttr(cmd.command)}">
+    <button class="danger s-remove-cmd" style="padding:4px 8px">×</button>`;
+  row.querySelector(".s-remove-cmd").addEventListener("click", () => row.remove());
+  return row;
+}
+
+async function saveSettings(originalCfg) {
+  const msg = document.getElementById("s-save-msg");
+  const setMsg = (text, cls) => { msg.textContent = text; msg.className = cls; };
+
+  // Collect nodes
+  const nodes = [];
+  document.querySelectorAll(".s-node-card").forEach(card => {
+    const num = parseInt(card.querySelector(".s-node-num").value);
+    if (isNaN(num)) return;
+    nodes.push({
+      node:        num,
+      host:        card.querySelector(".s-node-host").value.trim(),
+      user:        card.querySelector(".s-node-user").value.trim(),
+      password:    card.querySelector(".s-node-pass").value,
+      label:       card.querySelector(".s-node-label").value.trim(),
+      private:     card.querySelector(".s-node-private").checked,
+      stream_url:  card.querySelector(".s-node-stream").value.trim(),
+      website_url: card.querySelector(".s-node-website").value.trim(),
+    });
+  });
+  if (nodes.length === 0) { setMsg("At least one node is required.", "error"); return; }
+
+  // Collect commands
+  const commands = [];
+  document.querySelectorAll(".s-cmd-row").forEach(row => {
+    const label   = row.querySelector(".s-cmd-label").value.trim();
+    const command = row.querySelector(".s-cmd-command").value.trim();
+    if (label && command) commands.push({ label, command });
+  });
+
+  const newCfg = {
+    server: {
+      port:                  parseInt(document.getElementById("s-port").value)        || originalCfg.server.port,
+      host:                  document.getElementById("s-host").value.trim()           || originalCfg.server.host,
+      poll_interval_ms:      parseInt(document.getElementById("s-poll").value)        || originalCfg.server.poll_interval_ms,
+      ami_connect_timeout_s: parseInt(document.getElementById("s-ami-connect").value) || originalCfg.server.ami_connect_timeout_s,
+      ami_read_timeout_s:    parseInt(document.getElementById("s-ami-read").value)    || originalCfg.server.ami_read_timeout_s,
+    },
+    auth: {
+      username:          document.getElementById("s-auth-user").value.trim(),
+      password:          document.getElementById("s-auth-pass").value,
+      session_timeout_s: parseInt(document.getElementById("s-session-timeout").value) || 3600,
+    },
+    display: {
+      callsign:         document.getElementById("s-callsign").value.trim(),
+      title:            document.getElementById("s-title").value.trim(),
+      location:         document.getElementById("s-location").value.trim(),
+      timezone:         document.getElementById("s-tz").value.trim() || "America/New_York",
+      max_nodes:        parseInt(document.getElementById("s-maxnodes").value) || 0,
+      show_never_heard: document.getElementById("s-shownever").checked,
+    },
+    favorites: originalCfg.favorites ?? { nodes: [] },
+    nodes,
+    commands,
+  };
+
+  setMsg("Saving…", "info");
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newCfg),
+    });
+    const data = await res.json();
+    if (!data.ok) { setMsg(data.error || "Save failed.", "error"); return; }
+
+    setMsg("Saved. Server restarting…", "ok");
+    // Poll until the server is back up, then reload
+    setTimeout(async () => {
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const check = await fetch("/api/session");
+          if (check.ok) { window.location.reload(); return; }
+        } catch (_) {}
+      }
+      setMsg("Server did not respond — check: journalctl -u nodewatch", "error");
+    }, 800);
+  } catch (_) {
+    setMsg("Network error — could not reach server.", "error");
+  }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -324,7 +672,7 @@ function setStatusDot(state) {
     state === "connected" ? "connected" : state === "error" ? "error" : "";
 }
 
-// ── API calls ─────────────────────────────────────────────────────────────────
+// ── API helpers ───────────────────────────────────────────────────────────────
 
 async function apiPost(path, body) {
   const res = await fetch(path, {
@@ -345,7 +693,7 @@ function getLocalNode() { return document.getElementById("local-node").value; }
 function getRemote()    { return document.getElementById("remote-input").value.trim(); }
 function isPerm()       { return document.getElementById("perm-check").checked; }
 
-// ── Button wiring ─────────────────────────────────────────────────────────────
+// ── Home tab button wiring ────────────────────────────────────────────────────
 
 function wireButtons() {
   for (const [id, mode] of [
@@ -420,15 +768,57 @@ function wireLoginDialog() {
       username: document.getElementById("dlg-user").value.trim(),
       password: document.getElementById("dlg-pass").value,
     });
-    if (data.ok) { close(); setLoggedIn(true, document.getElementById("dlg-user").value.trim()); }
-    else errMsg.style.display = "block";
+    if (data.ok) {
+      close();
+      setLoggedIn(true, document.getElementById("dlg-user").value.trim());
+      if (currentTab === "settings") loadSettings();
+      if (currentTab === "favorites") loadFavorites();
+    } else {
+      errMsg.style.display = "block";
+    }
   };
 
   document.getElementById("dlg-submit").addEventListener("click", submit);
   document.getElementById("dlg-cancel").addEventListener("click", close);
   dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });
-  document.getElementById("dlg-user").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("dlg-pass").focus(); });
-  document.getElementById("dlg-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  document.getElementById("dlg-user").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("dlg-pass").focus();
+  });
+  document.getElementById("dlg-pass").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+}
+
+// ── Formatting helpers ────────────────────────────────────────────────────────
+
+function formatLastKeyed(secs) {
+  if (secs == null || secs === -1) return "Never";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${pad3(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+function formatElapsed(secs) {
+  if (secs == null || secs === 0) return "";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return h > 0 ? `${h}h ${pad2(m)}m` : m > 0 ? `${m}m ${pad2(s)}s` : `${s}s`;
+}
+
+function modeLabel(mode) {
+  return { T: "Transceive", R: "Receive Only", M: "Monitor", C: "Connecting" }[mode] ?? mode ?? "";
+}
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+function pad3(n) { return String(n).padStart(3, "0"); }
+
+function escHtml(s) {
+  return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function escAttr(s) {
+  return String(s ?? "").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────

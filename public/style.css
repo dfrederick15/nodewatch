@@ -55,13 +55,45 @@ header .spacer { flex: 1; }
 #status-dot.connected { background: var(--green); }
 #status-dot.error     { background: var(--red); }
 
+/* ── Tab bar ─────────────────────────────────────────────────────────── */
+#tab-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { background: none; color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Tab panels */
+.tab-panel { display: none; height: 100%; overflow-y: auto; }
+.tab-panel.active { display: block; }
+
 /* ── Layout ──────────────────────────────────────────────────────────── */
-main {
+#main-layout {
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 0;
-  height: calc(100vh - 49px);
+  height: calc(100vh - 85px); /* header + tab bar */
 }
+#content-area { overflow: hidden; display: flex; flex-direction: column; }
+
+/* When Favorites or Settings tab is active, collapse the sidebar */
+#main-layout.wide { grid-template-columns: 1fr; }
+#main-layout.wide #sidebar { display: none; }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────── */
 aside {
@@ -293,8 +325,169 @@ button:disabled { opacity: 0.4; cursor: default; }
   display: inline-block;
 }
 
+/* ── Favorites tab ───────────────────────────────────────────────────── */
+#favorites-area {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1200px;
+}
+.fav-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fav-toolbar h2 { font-size: 15px; font-weight: 600; flex: 1; }
+.fav-toolbar .hint { font-size: 12px; color: var(--muted); }
+.fav-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.fav-add-row input { width: 130px; }
+
+.fav-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 13px;
+}
+.fav-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: #1e2330;
+  border-bottom: 1px solid var(--border);
+}
+.fav-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #1e2228;
+  font-family: var(--mono);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.fav-table tr:last-child td { border-bottom: none; }
+.fav-table tr:hover td { background: #252b38; }
+.fav-table .node-col { color: var(--accent); }
+.fav-table .info-col { font-family: var(--font); color: var(--text); }
+.fav-table .muted-col { color: var(--muted); }
+.fav-status { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.fav-status.online  { background: #1a2a1a; color: var(--green); }
+.fav-status.offline { background: #2a1a1a; color: var(--red); }
+.fav-status.keyed   { background: #1a1020; color: #d97bef; }
+.fav-conns { color: var(--muted); font-size: 11px; }
+.fav-conn-list { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
+.fav-conn-chip {
+  background: var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.fav-conn-chip span { color: var(--text); }
+
+/* ── Settings tab ────────────────────────────────────────────────────── */
+#settings-area {
+  padding: 16px;
+  overflow-y: auto;
+  height: 100%;
+}
+.settings-wrap { max-width: 820px; }
+.settings-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.settings-topbar h2 { font-size: 16px; font-weight: 600; flex: 1; }
+.settings-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.settings-section-header {
+  background: #1e2330;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-section-header .toggle-icon { font-size: 10px; margin-left: auto; }
+.settings-section-body { padding: 14px; }
+.settings-section-body.collapsed { display: none; }
+.settings-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+.settings-grid label { font-size: 12px; color: var(--muted); }
+.settings-grid input[type="checkbox"] { justify-self: start; width: 16px; height: 16px; }
+.settings-hint { font-size: 11px; color: var(--muted); grid-column: 2; margin-top: -4px; }
+
+/* Node card */
+.s-node-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: var(--bg);
+}
+.s-node-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.s-node-card-header .spacer { flex: 1; }
+
+/* Command row */
+.s-cmd-row {
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+/* Settings save feedback */
+#s-save-msg {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  display: none;
+}
+#s-save-msg.ok    { background: #1a2a1a; color: var(--green); display: inline-block; }
+#s-save-msg.error { background: #2a1a1a; color: var(--red);   display: inline-block; }
+#s-save-msg.info  { background: #1a1e2a; color: #93c5fd;      display: inline-block; }
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 700px) {
-  main { grid-template-columns: 1fr; }
-  aside { border-right: none; border-bottom: 1px solid var(--border); }
+  #main-layout { grid-template-columns: 1fr; }
+  #sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+  .settings-grid { grid-template-columns: 1fr; }
+  .s-cmd-row { grid-template-columns: 1fr 1fr auto; }
 }

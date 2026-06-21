@@ -24,13 +24,19 @@
   </div>
 </header>
 
-<!-- ── Main layout ── -->
-<main>
+<!-- ── Tab bar ── -->
+<nav id="tab-bar">
+  <button class="tab-btn active" data-tab="home">Home</button>
+  <button class="tab-btn" data-tab="favorites">Favorites</button>
+  <button class="tab-btn" data-tab="settings">Settings</button>
+</nav>
 
-  <!-- ── Sidebar controls ── -->
+<!-- ── Main layout ── -->
+<main id="main-layout">
+
+  <!-- ── Sidebar (Home tab only) ── -->
   <aside id="sidebar">
 
-    <!-- Node / remote input -->
     <section>
       <h3>Node Selection</h3>
       <div class="field-row">
@@ -47,7 +53,6 @@
       </div>
     </section>
 
-    <!-- Link controls -->
     <section id="link-controls" style="display:none">
       <h3>Link</h3>
       <div class="btn-row">
@@ -58,7 +63,6 @@
       </div>
     </section>
 
-    <!-- Commands -->
     <section id="cmd-controls" style="display:none">
       <h3>Commands</h3>
       <div class="btn-row">
@@ -66,7 +70,6 @@
       </div>
     </section>
 
-    <!-- Control panel -->
     <section id="control-panel" style="display:none">
       <h3>Control Panel</h3>
       <div class="field-row">
@@ -76,7 +79,6 @@
       <button id="btn-run-cmd" class="primary">Execute</button>
     </section>
 
-    <!-- Output -->
     <section>
       <h3>Output</h3>
       <div id="result-box"></div>
@@ -84,11 +86,28 @@
 
   </aside>
 
-  <!-- ── Node panels ── -->
-  <div id="nodes-area">
-    <div style="color:var(--muted); padding:20px; font-size:13px;">
-      Connecting to server…
+  <!-- ── Content area (swaps between tabs) ── -->
+  <div id="content-area">
+
+    <!-- Home tab -->
+    <div id="tab-home" class="tab-panel active">
+      <div id="nodes-area">
+        <div style="color:var(--muted); padding:20px; font-size:13px;">
+          Connecting to server…
+        </div>
+      </div>
     </div>
+
+    <!-- Favorites tab -->
+    <div id="tab-favorites" class="tab-panel">
+      <div id="favorites-area"></div>
+    </div>
+
+    <!-- Settings tab -->
+    <div id="tab-settings" class="tab-panel">
+      <div id="settings-area"></div>
+    </div>
+
   </div>
 
 </main>

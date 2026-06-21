@@ -70,6 +70,18 @@ timezone = "America/New_York"
 
 
 # -----------------------------------------------------------------------------
+[favorites]
+# -----------------------------------------------------------------------------
+# AllStar node numbers to track in the Favorites tab.
+# The Favorites tab polls the AllStar stats API for each node's live status
+# (connections, keyed state) and displays them in a list.
+#
+# Add/remove nodes directly here, or use the Favorites tab in the web UI.
+
+nodes = []
+
+
+# -----------------------------------------------------------------------------
 # [[nodes]] — one block per local AllStar node
 # -----------------------------------------------------------------------------
 # Copy this section to add more nodes.

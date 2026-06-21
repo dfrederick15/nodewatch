@@ -57,6 +57,7 @@ interface Config {
   };
   nodes: NodeConfig[];
   commands: { label: string; command: string }[];
+  favorites?: { nodes: number[] };
 }
 
 const configPath = new URL("./config.toml", import.meta.url).pathname;
@@ -66,6 +67,64 @@ try {
 } catch (err) {
   console.error("Failed to read config.toml:", err);
   process.exit(1);
+}
+
+// ── Config serializer ─────────────────────────────────────────────────────────
+// Converts the in-memory config back to TOML. Comments are not preserved —
+// this is intentional when saving via the settings UI.
+
+function tomlStr(v: string): string {
+  return '"' + v.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
+}
+
+function serializeConfig(c: Config): string {
+  const L: string[] = [
+    "# AllStar Node Monitor — Configuration",
+    "# Saved by nodewatch settings panel. Restart to apply changes.",
+    "",
+    "[server]",
+    `port                 = ${c.server.port}`,
+    `host                 = ${tomlStr(c.server.host)}`,
+    `poll_interval_ms     = ${c.server.poll_interval_ms}`,
+    `ami_connect_timeout_s = ${c.server.ami_connect_timeout_s}`,
+    `ami_read_timeout_s   = ${c.server.ami_read_timeout_s}`,
+    "",
+    "[auth]",
+    `username         = ${tomlStr(c.auth.username)}`,
+    `password         = ${tomlStr(c.auth.password)}`,
+    `session_timeout_s = ${c.auth.session_timeout_s}`,
+    "",
+    "[display]",
+    `callsign         = ${tomlStr(c.display.callsign)}`,
+    `title            = ${tomlStr(c.display.title)}`,
+    `location         = ${tomlStr(c.display.location ?? "")}`,
+    `max_nodes        = ${c.display.max_nodes ?? 0}`,
+    `show_never_heard = ${c.display.show_never_heard ?? true}`,
+    `timezone         = ${tomlStr(c.display.timezone ?? "America/New_York")}`,
+    "",
+    "[favorites]",
+    `nodes = [${(c.favorites?.nodes ?? []).join(", ")}]`,
+    "",
+  ];
+  for (const n of c.nodes ?? []) {
+    L.push("[[nodes]]");
+    L.push(`node        = ${Number(n.node)}`);
+    L.push(`host        = ${tomlStr(n.host)}`);
+    L.push(`user        = ${tomlStr(n.user)}`);
+    L.push(`password    = ${tomlStr(n.password)}`);
+    L.push(`label       = ${tomlStr(n.label ?? "")}`);
+    L.push(`private     = ${n.private ?? false}`);
+    L.push(`stream_url  = ${tomlStr(n.stream_url ?? "")}`);
+    L.push(`website_url = ${tomlStr(n.website_url ?? "")}`);
+    L.push("");
+  }
+  for (const cmd of c.commands ?? []) {
+    L.push("[[commands]]");
+    L.push(`label   = ${tomlStr(cmd.label)}`);
+    L.push(`command = ${tomlStr(cmd.command)}`);
+    L.push("");
+  }
+  return L.join("\n");
 }
 
 // ── AllStar node database (astdb.txt) ─────────────────────────────────────────
@@ -405,6 +464,54 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── Favorites status (public) ─────────────────────────────────────────────
+  // Returns live data for each node in cfg.favorites.nodes by querying the
+  // AllStar stats API. Results are not cached here — the client polls at its
+  // own preferred interval (typically 30 s).
+
+  if (pathname === "/api/favorites/status" && req.method === "GET") {
+    const favNums = cfg.favorites?.nodes ?? [];
+    const results = await Promise.all(
+      favNums.map(async (nodeNum: number) => {
+        const n   = String(nodeNum);
+        const inf = nodeInfo(n);
+        try {
+          const apiRes = await fetch(`https://stats.allstarlink.org/api/v1/node/${n}`, {
+            signal: AbortSignal.timeout(5000),
+            headers: { "User-Agent": "nodewatch/1.0" },
+          });
+          if (!apiRes.ok) throw new Error(`HTTP ${apiRes.status}`);
+          const data  = await apiRes.json() as Record<string, unknown>;
+          const conns = (data.conns ?? data.connections ?? []) as Array<Record<string, unknown>>;
+          const connNodes = conns
+            .map((c) => String(c.node ?? c.nodenum ?? c.id ?? "").trim())
+            .filter(Boolean);
+          const callsign = String(data.callsign ?? "").trim();
+          return {
+            node: n,
+            info: inf || (callsign ? callsign : ""),
+            keyed: !!(data.keyed ?? data.cos_keyed ?? false),
+            connection_count: connNodes.length,
+            connections: connNodes.slice(0, 8).map((cn) => ({ node: cn, info: nodeInfo(cn) })),
+            status: "online",
+          };
+        } catch (_) {
+          return { node: n, info: inf, keyed: false, connection_count: 0, connections: [], status: "offline" };
+        }
+      })
+    );
+    json(res, 200, results);
+    return;
+  }
+
+  // ── Settings (auth required) ──────────────────────────────────────────────
+
+  if (pathname === "/api/settings" && req.method === "GET") {
+    if (!requireAuth(req, res)) return;
+    json(res, 200, cfg);
+    return;
+  }
+
   // ── SSE stream ────────────────────────────────────────────────────────────
 
   if (pathname === "/api/sse") {
@@ -427,6 +534,40 @@ const server = http.createServer(async (req, res) => {
   // ── Authenticated action endpoints ────────────────────────────────────────
 
   if (pathname.startsWith("/api/") && req.method === "POST") {
+
+    // Settings save — write config.toml and restart the process so systemd
+    // picks up the new file. A backup is written first.
+    if (pathname === "/api/settings") {
+      if (!requireAuth(req, res)) return;
+      const newCfg = await readBody(req) as unknown as Config;
+      if (!newCfg?.server || !newCfg?.auth || !newCfg?.display || !Array.isArray(newCfg?.nodes)) {
+        json(res, 400, { error: "Invalid config structure" }); return;
+      }
+      if (fs.existsSync(configPath)) fs.copyFileSync(configPath, configPath + ".bak");
+      fs.writeFileSync(configPath, serializeConfig(newCfg), "utf8");
+      json(res, 200, { ok: true, message: "Config saved. Server restarting…" });
+      setTimeout(() => process.exit(0), 500);
+      return;
+    }
+
+    // Favorites add / remove — update cfg in memory AND rewrite config.toml.
+    // No restart needed; the favorites list is read fresh on each /api/favorites/status call.
+    if (pathname === "/api/favorites/add" || pathname === "/api/favorites/remove") {
+      if (!requireAuth(req, res)) return;
+      const body = await readBody(req);
+      const node = parseInt(String(body.node));
+      if (isNaN(node)) { json(res, 400, { error: "Invalid node number" }); return; }
+      if (!cfg.favorites) cfg.favorites = { nodes: [] };
+      if (pathname === "/api/favorites/add") {
+        if (!cfg.favorites.nodes.includes(node)) cfg.favorites.nodes.push(node);
+      } else {
+        cfg.favorites.nodes = cfg.favorites.nodes.filter((n) => n !== node);
+      }
+      fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
+      json(res, 200, { ok: true, nodes: cfg.favorites.nodes });
+      return;
+    }
+
     if (!requireAuth(req, res)) return;
     const body = await readBody(req);
 
