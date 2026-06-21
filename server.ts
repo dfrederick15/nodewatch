@@ -523,10 +523,11 @@ const publicDir = new URL("./public", import.meta.url).pathname;
 
 function serveStatic(res: http.ServerResponse, filePath: string): void {
   const mime = MIME[path.extname(filePath)] ?? "application/octet-stream";
-  try {
-    res.writeHead(200, { "Content-Type": mime });
-    res.end(fs.readFileSync(filePath));
-  } catch (_) { res.writeHead(404); res.end("Not found"); }
+  let content: Buffer;
+  try { content = fs.readFileSync(filePath); }
+  catch (_) { res.writeHead(404); res.end("Not found"); return; }
+  res.writeHead(200, { "Content-Type": mime });
+  res.end(content);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -878,3 +879,7 @@ server.listen(cfg.server.port, cfg.server.host, () => {
   console.log(`AllStar Monitor running at http://${cfg.server.host}:${cfg.server.port}`);
   console.log(`Monitoring ${cfg.nodes.length} node(s): ${cfg.nodes.map((n) => n.node).join(", ")}`);
 });
+
+// Prevent uncaught exceptions (e.g. double-response bugs) from crashing the process
+process.on("uncaughtException", (err) => console.error("Uncaught exception:", err.message));
+process.on("unhandledRejection", (err) => console.error("Unhandled rejection:", err));
