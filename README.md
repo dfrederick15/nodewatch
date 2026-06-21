@@ -49,6 +49,12 @@ sudo bash install.sh --update
 sudo bash install.sh --reconfigure
 ```
 
+**Uninstall:**
+
+```bash
+sudo bash install.sh --uninstall
+```
+
 ## Manual install
 
 ```bash

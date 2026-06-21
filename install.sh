@@ -7,6 +7,7 @@
 #   sudo bash install.sh --port 9090      # fresh install on a custom port
 #   sudo bash install.sh --reconfigure    # re-read Asterisk config and rewrite config.toml
 #   sudo bash install.sh --update         # pull latest code, restart service
+#   sudo bash install.sh --uninstall      # stop service and remove all files
 # =============================================================================
 set -euo pipefail
 
@@ -16,12 +17,14 @@ SERVICE="nodewatch"
 PORT=8080
 RECONFIGURE=false
 UPDATE_ONLY=false
+UNINSTALL=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port)        PORT="${2:?'--port requires a value'}"; shift 2 ;;
     --reconfigure) RECONFIGURE=true; shift ;;
     --update)      UPDATE_ONLY=true; shift ;;
+    --uninstall)   UNINSTALL=true; shift ;;
     *) shift ;;
   esac
 done
@@ -34,6 +37,33 @@ warn() { echo -e "${Y}  !${NC}  $*"; }
 die()  { echo -e "\n${R}  ✗  ERROR:${NC} $*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "Run as root:  sudo bash install.sh"
+
+# ── Uninstall path ───────────────────────────────────────────────────────────
+if $UNINSTALL; then
+  step "Uninstalling nodewatch..."
+  if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    systemctl stop "$SERVICE"
+    info "Service stopped"
+  fi
+  if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
+    systemctl disable "$SERVICE"
+    info "Service disabled"
+  fi
+  SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
+  if [[ -f "$SERVICE_FILE" ]]; then
+    rm -f "$SERVICE_FILE"
+    systemctl daemon-reload
+    info "Service file removed"
+  fi
+  if [[ -d "$INSTALL_DIR" ]]; then
+    rm -rf "$INSTALL_DIR"
+    info "Removed $INSTALL_DIR"
+  fi
+  echo ""
+  echo -e "${G}  nodewatch has been uninstalled.${NC}"
+  echo ""
+  exit 0
+fi
 
 # ── Find a free port ──────────────────────────────────────────────────────────
 REQUESTED_PORT=$PORT
