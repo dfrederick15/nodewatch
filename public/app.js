@@ -176,15 +176,23 @@ function renderNodeTable(status) {
   const wrap = document.getElementById(`table-wrap-${nodeNum}`);
   if (!wrap) return;
 
+  const { cos_keyed, tx_keyed } = status;
+
+  // Reflect active state on the panel element so CSS can color the header
+  const panel = document.getElementById(`panel-${nodeNum}`);
+  if (panel) {
+    panel.dataset.state = cos_keyed && tx_keyed ? "fullduplex"
+      : cos_keyed ? "cos" : tx_keyed ? "ptt" : "idle";
+  }
+
   const badge = document.getElementById(`badge-${nodeNum}`);
   if (badge) {
-    const { cos_keyed, tx_keyed } = status;
     if (cos_keyed && tx_keyed) {
       badge.className = "state-badge fullduplex"; badge.textContent = "Full Duplex";
     } else if (cos_keyed) {
-      badge.className = "state-badge cos";        badge.textContent = "COS";
+      badge.className = "state-badge cos";        badge.textContent = "Carrier Detected";
     } else if (tx_keyed) {
-      badge.className = "state-badge ptt";        badge.textContent = "PTT";
+      badge.className = "state-badge ptt";        badge.textContent = "Transmitting";
     } else {
       badge.className = "state-badge idle";       badge.textContent = "Idle";
     }
@@ -209,9 +217,14 @@ function renderNodeTable(status) {
     <table class="node-table">
       <thead>
         <tr>
-          <th style="width:28px"></th>
-          <th>Node</th><th>Info</th><th>Last Heard</th>
-          <th>Link</th><th>Dir</th><th>Connected</th><th>Mode</th>
+          <th style="width:26px"></th>
+          <th>Node #</th>
+          <th>Station / Location</th>
+          <th>Last Keyed</th>
+          <th>Link Type</th>
+          <th>Direction</th>
+          <th>Link Age</th>
+          <th>Mode</th>
         </tr>
       </thead><tbody>`;
 
@@ -670,6 +683,9 @@ function setLoggedIn(yes, username) {
 function setStatusDot(state) {
   document.getElementById("status-dot").className =
     state === "connected" ? "connected" : state === "error" ? "error" : "";
+  const txt = document.getElementById("status-text");
+  if (txt) txt.textContent =
+    state === "connected" ? "Connected" : state === "error" ? "No Signal" : "Connecting…";
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
