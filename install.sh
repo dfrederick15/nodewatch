@@ -183,24 +183,40 @@ AMI_PASS=$(awk -v u="$AMI_USER" '
 [[ -n "$AMI_PASS" ]] || die "No secret/password found for [$AMI_USER] in $MGR_CONF"
 info "AMI credentials: user=$AMI_USER"
 
-# Callsign: try common AllStar env files, then fall back to MYCALL
+# Callsign detection — try sources in order, stop at first hit
 CALLSIGN="MYCALL"
+
+# 1. AllStar env files (ASL1/ASL2)
 for env_file in /usr/local/etc/allstar.env /etc/allstar/allstar.env /etc/asterisk/allstar.env; do
   if [[ -f "$env_file" ]]; then
     cs=$(grep -i '^CALL=' "$env_file" 2>/dev/null | head -1 | cut -d'=' -f2 | tr -d '"'"'" | tr -d ' ' || true)
     [[ -n "$cs" ]] && CALLSIGN="$cs" && break
   fi
 done
-# Also try rpt.conf: lines like "call = W1ABC" inside the first node stanza
+
+# 2. rpt.conf "call =" inside the node stanza (ASL1/ASL2 style)
 if [[ "$CALLSIGN" == "MYCALL" ]]; then
   first_node="${NODE_NUMS[0]}"
-  cs=$(awk -v n="[$first_node]" '
-    $0==n || $0=="["n"](node-main)" { found=1; next }
-    found && /^call *=/ { gsub(/ /,"",$0); sub(/^call=/,""); print; exit }
+  cs=$(awk -v n="$first_node" '
+    $0 ~ "^\\[" n "\\]" || $0 ~ "^\\[" n "\\]\\(node-main\\)" { found=1; next }
+    found && /^[[:space:]]*call[[:space:]]*=/ {
+      sub(/^[[:space:]]*call[[:space:]]*=[[:space:]]*/, "")
+      gsub(/[[:space:]\r]*$/, "")
+      print; exit
+    }
     found && /^\[/ { exit }
   ' "$RPT_CONF" | tr -d '"' | tr -d "'" || true)
   [[ -n "$cs" ]] && CALLSIGN="$cs"
 fi
+
+# 3. AllStar stats API (ASL3 — callsign is registered in the network database)
+if [[ "$CALLSIGN" == "MYCALL" ]] && command -v curl &>/dev/null; then
+  first_node="${NODE_NUMS[0]}"
+  cs=$(curl -sf --max-time 8 "https://stats.allstarlink.org/api/stats/${first_node}" 2>/dev/null \
+    | grep -oP '"callsign"\s*:\s*"\K[^"]+' | head -1 || true)
+  [[ -n "$cs" ]] && CALLSIGN="$cs" && info "Callsign from AllStar registry: $cs"
+fi
+
 info "Callsign: $CALLSIGN"
 
 # ── 5. Write config.toml ──────────────────────────────────────────────────────
