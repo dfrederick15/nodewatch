@@ -180,39 +180,44 @@ interface SubnodeCacheEntry {
 const subnodeCache = new Map<string, SubnodeCacheEntry>();
 const SUBNODE_TTL = 60_000; // 60 seconds
 
+// Parse an AllStar stats API response into a flat list of connected node entries.
+// Endpoint: https://stats.allstarlink.org/api/stats/{node}
+// Response shape: { stats: { data: { linkedNodes: [ { name: number, callsign: string,
+//   node_frequency: string, server: { Location: string } } ] } } }
+function parseStatsResponse(data: Record<string, unknown>, selfNode: string): SubnodeEntry[] {
+  const stats = data.stats as Record<string, unknown> | undefined;
+  const inner = stats?.data as Record<string, unknown> | undefined;
+  const linked = (inner?.linkedNodes ?? []) as Array<Record<string, unknown>>;
+  const entries: SubnodeEntry[] = [];
+  for (const conn of linked) {
+    const n = String(conn.name ?? "").trim();
+    if (!n || n === selfNode) continue;
+    // Prefer astdb for consistent display; fall back to API callsign + location.
+    const apiInfo = [
+      String(conn.callsign ?? "").trim(),
+      String((conn.server as Record<string,unknown>)?.Location ?? conn.node_frequency ?? "").trim(),
+    ].filter(Boolean).join(" — ");
+    entries.push({ node: n, info: nodeInfo(n) || apiInfo });
+  }
+  return entries;
+}
+
 async function fetchSubnodes(nodeNum: string): Promise<SubnodeEntry[]> {
   const cached = subnodeCache.get(nodeNum);
-  if (cached && Date.now() - cached.fetchedAt < SUBNODE_TTL) {
-    return cached.subnodes;
-  }
+  if (cached && Date.now() - cached.fetchedAt < SUBNODE_TTL) return cached.subnodes;
 
   try {
-    // AllStar stats API — returns connection info for any node on the network.
-    // This is a public, unauthenticated endpoint.
-    const url = `https://stats.allstarlink.org/api/v1/node/${nodeNum}`;
+    const url = `https://stats.allstarlink.org/api/stats/${nodeNum}`;
     const res = await fetch(url, {
       signal: AbortSignal.timeout(5000),
       headers: { "User-Agent": "nodewatch/1.0" },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json() as Record<string, unknown>;
-
-    const subnodes: SubnodeEntry[] = [];
-
-    // The AllStar API returns a "conns" or "connections" array.
-    // Each entry has at minimum a node number.
-    const conns = (data.conns ?? data.connections ?? []) as Array<Record<string, unknown>>;
-    for (const conn of conns) {
-      const n = String(conn.node ?? conn.nodenum ?? conn.id ?? "").trim();
-      if (n && n !== nodeNum) {
-        subnodes.push({ node: n, info: nodeInfo(n) });
-      }
-    }
-
+    const subnodes = parseStatsResponse(data, nodeNum);
     subnodeCache.set(nodeNum, { subnodes, fetchedAt: Date.now() });
     return subnodes;
   } catch (_) {
-    // API unreachable or node not found — return empty, don't cache so we retry later
     return [];
   }
 }
@@ -476,21 +481,22 @@ const server = http.createServer(async (req, res) => {
         const n   = String(nodeNum);
         const inf = nodeInfo(n);
         try {
-          const apiRes = await fetch(`https://stats.allstarlink.org/api/v1/node/${n}`, {
+          const apiRes = await fetch(`https://stats.allstarlink.org/api/stats/${n}`, {
             signal: AbortSignal.timeout(5000),
             headers: { "User-Agent": "nodewatch/1.0" },
           });
           if (!apiRes.ok) throw new Error(`HTTP ${apiRes.status}`);
           const data  = await apiRes.json() as Record<string, unknown>;
-          const conns = (data.conns ?? data.connections ?? []) as Array<Record<string, unknown>>;
-          const connNodes = conns
-            .map((c) => String(c.node ?? c.nodenum ?? c.id ?? "").trim())
-            .filter(Boolean);
-          const callsign = String(data.callsign ?? "").trim();
+            const stats  = data.stats as Record<string, unknown> | undefined;
+          const inner  = stats?.data as Record<string, unknown> | undefined;
+          const linked = (inner?.linkedNodes ?? []) as Array<Record<string, unknown>>;
+          const keyed  = !!(inner?.keyed ?? false);
+          const connNodes = linked.map(c => String(c.name ?? "").trim()).filter(Boolean);
+          const apiCallsign = String(linked[0]?.callsign ?? "").trim();
           return {
             node: n,
-            info: inf || (callsign ? callsign : ""),
-            keyed: !!(data.keyed ?? data.cos_keyed ?? false),
+            info: inf || apiCallsign,
+            keyed,
             connection_count: connNodes.length,
             connections: connNodes.slice(0, 8).map((cn) => ({ node: cn, info: nodeInfo(cn) })),
             status: "online",
