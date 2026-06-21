@@ -70,6 +70,15 @@ if $UNINSTALL; then
 fi
 
 # ── Find a free port ──────────────────────────────────────────────────────────
+# If config.toml already exists and no --port was given, start from its port
+# so we don't needlessly change a working install.
+CONFIG="$INSTALL_DIR/config.toml"
+if [[ -f "$CONFIG" ]] && [[ "$PORT" -eq 8080 ]]; then
+  CFG_PORT=$(awk -F'=' '/^\[server\]/{s=1} s && /^port[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2+0; exit}' "$CONFIG" 2>/dev/null || true)
+  [[ -n "$CFG_PORT" && "$CFG_PORT" -gt 0 ]] && PORT=$CFG_PORT
+fi
+# Stop the service first so its own port doesn't look "in use"
+systemctl stop "$SERVICE" 2>/dev/null || true
 REQUESTED_PORT=$PORT
 while ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q .; do
   PORT=$(( PORT + 1 ))
@@ -140,11 +149,12 @@ MGR_CONF="/etc/asterisk/manager.conf"
 [[ -f "$RPT_CONF" ]] || die "$RPT_CONF not found — is AllStar/Asterisk installed?"
 [[ -f "$MGR_CONF" ]] || die "$MGR_CONF not found — is AllStar/Asterisk installed?"
 
-# Node numbers: lines like "65659 = radio@127.0.0.1/65659,NONE" inside [nodes]
+# Node numbers: only lines pointing to 127.0.0.1 or localhost — these are the
+# local AllStar nodes. Other entries (remote nodes, VOIP extensions, etc.) are skipped.
 mapfile -t NODE_NUMS < <(awk '
   /^\[nodes\]/ { in_sec=1; next }
   /^\[/        { in_sec=0 }
-  in_sec && /^[0-9]+ *=/ { print $1 }
+  in_sec && /^[0-9]+ *=.*(127\.0\.0\.1|localhost)/ { print $1 }
 ' "$RPT_CONF")
 [[ ${#NODE_NUMS[@]} -gt 0 ]] || die "No local node numbers found in $RPT_CONF — check the [nodes] section"
 info "Found node(s): ${NODE_NUMS[*]}"
@@ -194,10 +204,10 @@ fi
 info "Callsign: $CALLSIGN"
 
 # ── 5. Write config.toml ──────────────────────────────────────────────────────
-CONFIG="$INSTALL_DIR/config.toml"
-
 if [[ -f "$CONFIG" ]] && ! $RECONFIGURE; then
   warn "config.toml already exists — skipping (run with --reconfigure to overwrite)"
+  # Always sync the port in case it changed (e.g. conflict resolution above)
+  sed -i "s/^port[[:space:]]*=.*/port = $PORT/" "$CONFIG"
 else
   step "Writing config.toml..."
   [[ -f "$CONFIG" ]] && cp "$CONFIG" "${CONFIG}.bak" && info "Backed up existing config to config.toml.bak"
