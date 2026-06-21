@@ -392,6 +392,10 @@ command = "module reload chan_iax2.so"
 [[commands]]
 label   = "Reload app_rpt"
 command = "module reload app_rpt.so"
+
+[[commands]]
+label   = "Restart Asterisk"
+command = "shell:/usr/local/sbin/astres.sh"
 TOML
 
   info "config.toml written"

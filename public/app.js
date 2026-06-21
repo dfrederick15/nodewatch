@@ -854,12 +854,13 @@ async function generateProvisionCommand(panel) {
     const d = await res.json();
 
     const cmd =
+      `curl -fsSL '${d.server_url}/api/provision/script' | \\\n` +
       `sudo env \\\n` +
       `  NODEWATCH_URL='${d.server_url}' \\\n` +
       `  TOKEN_ID='${d.token_id}' \\\n` +
       `  KEY_HEX='${d.key_hex}' \\\n` +
       `  IV_HEX='${d.iv_hex}' \\\n` +
-      `  bash <(curl -sfL '${d.server_url}/api/provision/script')`;
+      `  bash`;
 
     textarea.value = cmd;
     result.style.display = "block";
@@ -867,14 +868,13 @@ async function generateProvisionCommand(panel) {
     btn.disabled = false;
 
     copyBtn.onclick = () => {
-      navigator.clipboard.writeText(cmd).then(() => {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy Command"; }, 2000);
-      }).catch(() => {
-        textarea.select(); document.execCommand("copy");
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy Command"; }, 2000);
-      });
+      const flash = () => { copyBtn.textContent = "Copied!"; setTimeout(() => { copyBtn.textContent = "Copy Command"; }, 2000); };
+      const legacy = () => { textarea.focus(); textarea.select(); try { document.execCommand("copy"); } catch (_) {} flash(); };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(cmd).then(flash).catch(legacy);
+      } else {
+        legacy();
+      }
     };
 
     // Countdown

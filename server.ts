@@ -20,6 +20,7 @@ import * as path  from "node:path";
 import * as os    from "node:os";
 import * as crypto from "node:crypto";
 import * as dgram from "node:dgram";
+import { exec } from "node:child_process";
 import { parse as parseToml } from "smol-toml";
 import { AMIClient, type NodeStatus, type NodeConn } from "./ami.ts";
 
@@ -895,6 +896,19 @@ const server = http.createServer(async (req, res) => {
       const allowed = cfg.commands.find((c) => c.command === cmdTemplate);
       if (!allowed) { json(res, 403, { error: "Command not in config.toml [[commands]] list" }); return; }
       const cmdString = cmdTemplate.replace(/%node%/g, localNode);
+
+      // shell: prefix — run as a shell command instead of through AMI
+      if (cmdString.startsWith("shell:")) {
+        const shellCmd = cmdString.slice(6).trim();
+        const output = await new Promise<string>((resolve) => {
+          exec(shellCmd, { timeout: 30_000 }, (err, stdout, stderr) => {
+            resolve((stdout + stderr).trim() || (err ? err.message : "Done."));
+          });
+        });
+        json(res, 200, { ok: true, output });
+        return;
+      }
+
       try {
         const conn = await ensureConnected(nodeCfg);
         const output = await conn.client.command(conn.socket!, cmdString);

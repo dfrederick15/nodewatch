@@ -26,7 +26,7 @@ A web-based monitor and controller for [AllStar Link](https://www.allstarlink.or
 Run the installer as root on your AllStar node. It reads your existing Asterisk config, writes `config.toml`, and sets up a systemd service.
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/dfrederick15/nodewatch/main/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/dfrederick15/nodewatch/main/install.sh | sudo bash
 ```
 
 Then open `http://<node-ip>:8080` in a browser.
