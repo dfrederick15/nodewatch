@@ -928,3 +928,13 @@ button:disabled { opacity: 0.35; cursor: default; }
   .node-panel-header { transition: none; }
   #status-dot        { transition: none; }
 }
+
+/* ── Footer ── */
+#site-footer {
+  text-align: center;
+  padding: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  letter-spacing: 0.04em;
+}
