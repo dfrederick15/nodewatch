@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AllStar Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div>
+    <div class="callsign" id="hdr-callsign">AllStar</div>
+    <div class="subtitle" id="hdr-subtitle">Monitor</div>
+  </div>
+  <div class="spacer"></div>
+  <span id="spinner">*</span>
+  <div id="status-dot" title="Connection status"></div>
+  <div id="auth-area">
+    <span id="auth-label">Not logged in</span>
+    <button id="btn-login">Login</button>
+    <button id="btn-logout" style="display:none">Logout</button>
+  </div>
+</header>
+
+<!-- ── Main layout ── -->
+<main>
+
+  <!-- ── Sidebar controls ── -->
+  <aside id="sidebar">
+
+    <!-- Node / remote input -->
+    <section>
+      <h3>Node Selection</h3>
+      <div class="field-row">
+        <label>Local Node</label>
+        <select id="local-node"></select>
+      </div>
+      <div class="field-row">
+        <label>Remote Node / DTMF</label>
+        <input type="text" id="remote-input" placeholder="e.g. 27339 or *70">
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="perm-check">
+        <label for="perm-check">Permanent (survives rpt restart)</label>
+      </div>
+    </section>
+
+    <!-- Link controls -->
+    <section id="link-controls" style="display:none">
+      <h3>Link</h3>
+      <div class="btn-row">
+        <button id="btn-connect" class="primary">Connect</button>
+        <button id="btn-monitor">Monitor</button>
+        <button id="btn-localmon">Local Mon</button>
+        <button id="btn-disconnect" class="danger">Disconnect</button>
+      </div>
+    </section>
+
+    <!-- Commands -->
+    <section id="cmd-controls" style="display:none">
+      <h3>Commands</h3>
+      <div class="btn-row">
+        <button id="btn-dtmf">Send DTMF</button>
+      </div>
+    </section>
+
+    <!-- Control panel -->
+    <section id="control-panel" style="display:none">
+      <h3>Control Panel</h3>
+      <div class="field-row">
+        <label>Command</label>
+        <select id="cmd-select"></select>
+      </div>
+      <button id="btn-run-cmd" class="primary">Execute</button>
+    </section>
+
+    <!-- Output -->
+    <section>
+      <h3>Output</h3>
+      <div id="result-box"></div>
+    </section>
+
+  </aside>
+
+  <!-- ── Node panels ── -->
+  <div id="nodes-area">
+    <div style="color:var(--muted); padding:20px; font-size:13px;">
+      Connecting to server…
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Login dialog ── -->
+<div id="login-dialog">
+  <div class="dialog-box">
+    <h2>Login</h2>
+    <div class="field-row">
+      <label>Username</label>
+      <input type="text" id="dlg-user" autocomplete="username" autocapitalize="none">
+    </div>
+    <div class="field-row">
+      <label>Password</label>
+      <input type="password" id="dlg-pass" autocomplete="current-password">
+    </div>
+    <div class="error-msg" id="dlg-error">Invalid credentials.</div>
+    <div class="btn-row">
+      <button id="dlg-submit" class="primary">Login</button>
+      <button id="dlg-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
