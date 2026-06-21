@@ -48,6 +48,18 @@ header .subtitle {
 header .spacer { flex: 1; }
 #auth-area { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 
+/* IP address block in header */
+#hdr-ips {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 1px solid var(--border);
+  padding-left: 14px;
+}
+.hdr-ip-row { display: flex; align-items: baseline; gap: 5px; line-height: 1.3; }
+.hdr-ip-label { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); min-width: 3.2ch; }
+.hdr-ip-val { font-family: var(--mono); font-size: 11px; color: var(--text); }
+
 /* NTP clock */
 #clock-area {
   display: flex;

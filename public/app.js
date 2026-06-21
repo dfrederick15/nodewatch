@@ -59,11 +59,27 @@ async function boot() {
   await loadConfig();
   await checkSession();
   await initClock();
+  loadNetworkInfo();   // fire-and-forget; fills header IPs when ready
   connectSSE();
   startLiveTimer();
   wireButtons();
   wireLoginDialog();
   wireTabs();
+}
+
+async function loadNetworkInfo() {
+  try {
+    const res = await fetch("/api/network");
+    if (!res.ok) return;
+    const d = await res.json();
+    const el = document.getElementById("hdr-ips");
+    if (!el) return;
+    const rows = [];
+    if (d.internal)      rows.push(`<span class="hdr-ip-row"><span class="hdr-ip-label">INT</span><span class="hdr-ip-val">${escHtml(d.internal)}</span></span>`);
+    if (d.external_ipv4) rows.push(`<span class="hdr-ip-row"><span class="hdr-ip-label">EXT4</span><span class="hdr-ip-val">${escHtml(d.external_ipv4)}</span></span>`);
+    if (d.external_ipv6) rows.push(`<span class="hdr-ip-row"><span class="hdr-ip-label">EXT6</span><span class="hdr-ip-val">${escHtml(d.external_ipv6)}</span></span>`);
+    el.innerHTML = rows.join("");
+  } catch (_) {}
 }
 
 async function loadConfig() {

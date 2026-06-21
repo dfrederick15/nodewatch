@@ -17,6 +17,7 @@
 import * as http  from "node:http";
 import * as fs    from "node:fs";
 import * as path  from "node:path";
+import * as os    from "node:os";
 import * as crypto from "node:crypto";
 import * as dgram from "node:dgram";
 import { parse as parseToml } from "smol-toml";
@@ -338,6 +339,40 @@ function newProvisionToken(): { tokenId: string; keyHex: string; ivHex: string }
   return { tokenId, keyHex, ivHex };
 }
 
+// ── Network info ──────────────────────────────────────────────────────────────
+// Internal IP: first non-loopback IPv4 from OS network interfaces.
+// External IPs: fetched from icanhazip.com, cached for 5 minutes.
+
+function getInternalIp(): string {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces ?? []) {
+      if (iface.family === "IPv4" && !iface.internal) return iface.address;
+    }
+  }
+  return "";
+}
+
+interface NetCache { ipv4: string; ipv6: string; fetchedAt: number; }
+let netCache: NetCache | null = null;
+
+async function getExternalIps(): Promise<{ ipv4: string; ipv6: string }> {
+  if (netCache && Date.now() - netCache.fetchedAt < 5 * 60_000) {
+    return { ipv4: netCache.ipv4, ipv6: netCache.ipv6 };
+  }
+  const [v4, v6] = await Promise.allSettled([
+    fetch("https://ipv4.icanhazip.com", { signal: AbortSignal.timeout(5000) })
+      .then(r => r.text()).then(t => t.trim()),
+    fetch("https://ipv6.icanhazip.com", { signal: AbortSignal.timeout(5000) })
+      .then(r => r.text()).then(t => t.trim()),
+  ]);
+  const result = {
+    ipv4: v4.status === "fulfilled" ? v4.value : "",
+    ipv6: v6.status === "fulfilled" ? v6.value : "",
+  };
+  netCache = { ...result, fetchedAt: Date.now() };
+  return result;
+}
+
 // ── AMI connection pool ───────────────────────────────────────────────────────
 
 interface HostConn {
@@ -606,6 +641,16 @@ const server = http.createServer(async (req, res) => {
       offset_ms:  ntpOffsetMs,
       ntp_server: ntpServer,
       synced_at:  ntpSyncedAt,
+    });
+    return;
+  }
+
+  if (pathname === "/api/network") {
+    const ext = await getExternalIps();
+    json(res, 200, {
+      internal:      getInternalIp(),
+      external_ipv4: ext.ipv4,
+      external_ipv6: ext.ipv6,
     });
     return;
   }
