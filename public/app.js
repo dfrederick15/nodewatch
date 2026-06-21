@@ -24,7 +24,26 @@ const expandedRows = new Set();
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+const THEMES = [
+  { id: "amber", file: "theme-amber.css", label: "Amber — warm near-black with gold accents" },
+  { id: "slate", file: "theme-slate.css", label: "Slate — cool blue-gray dark theme" },
+];
+
+function applyTheme(id) {
+  const theme = THEMES.find(t => t.id === id) ?? THEMES[0];
+  document.getElementById("theme-css").href = theme.file;
+  localStorage.setItem("nodewatch-theme", theme.id);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem("nodewatch-theme") ?? "amber";
+  applyTheme(saved);
+}
+
 async function boot() {
+  initTheme();
   await loadConfig();
   await checkSession();
   await initClock();
@@ -460,6 +479,22 @@ function renderSettings(cfg, area) {
     <span id="s-save-msg"></span>
     <button id="s-save-btn" class="primary">Save &amp; Apply</button>`;
   wrap.appendChild(topbar);
+
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  const currentTheme = localStorage.getItem("nodewatch-theme") ?? "amber";
+  const themeOptions = THEMES.map(t =>
+    `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:6px">
+      <input type="radio" name="theme-pick" value="${escAttr(t.id)}" ${t.id === currentTheme ? "checked" : ""}
+        style="accent-color:var(--accent);width:14px;height:14px">
+      <span>${escHtml(t.label)}</span>
+    </label>`
+  ).join("");
+  const themeSection = settingsSection("Appearance / Theme", true,
+    `<div style="display:flex;flex-direction:column;gap:2px">${themeOptions}</div>`);
+  wrap.appendChild(themeSection);
+  themeSection.querySelectorAll("input[name='theme-pick']").forEach(radio => {
+    radio.addEventListener("change", () => applyTheme(radio.value));
+  });
 
   // ── Display ────────────────────────────────────────────────────────────────
   wrap.appendChild(settingsSection("Display", true, `
