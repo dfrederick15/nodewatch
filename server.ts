@@ -691,8 +691,7 @@ const server = http.createServer(async (req, res) => {
       if (fs.existsSync(configPath)) fs.copyFileSync(configPath, configPath + ".bak");
       fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
       console.log(`Provision: added ${added} node(s) via remote script`);
-      json(res, 200, { ok: true, message: `${added} node(s) added. Server restarting…`, added });
-      if (added > 0) setTimeout(() => process.exit(0), 500);
+      json(res, 200, { ok: true, message: `${added} node(s) added.`, added });
     } catch (err) {
       json(res, 400, { error: `Processing failed: ${(err as Error).message}` });
     }
