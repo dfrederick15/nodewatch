@@ -150,7 +150,7 @@ else
 fi
 
 # ── Get this node's local IP (route toward nodewatch) ─────────────────────────
-LOCAL_IP=$(ip route get "$NW_HOST" 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')
+LOCAL_IP=$(ip route get "$NW_HOST" 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1);exit}}}' || hostname -I | awk '{print $1}')
 ok "This node's IP toward nodewatch: $LOCAL_IP"
 
 # ── Build JSON payload ─────────────────────────────────────────────────────────

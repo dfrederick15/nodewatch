@@ -413,7 +413,7 @@ Type=simple
 User=root
 WorkingDirectory=$INSTALL_DIR
 ExecStart=/usr/bin/node --experimental-strip-types server.ts
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]
