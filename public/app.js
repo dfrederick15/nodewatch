@@ -287,6 +287,7 @@ function closeSchedModal() {
 }
 
 function openSchedModal(sched, idx, allSchedules) {
+  if (!loggedIn) return;
   const modal = document.getElementById("sched-modal");
   const isEdit = idx >= 0 && sched !== null;
 
@@ -1162,7 +1163,9 @@ async function loadSchedules() {
   const addBtn = document.createElement("button");
   addBtn.className = "primary";
   addBtn.textContent = "+ Add Schedule";
-  addBtn.addEventListener("click", () => openSchedModal(null, -1, schedules));
+  if (loggedIn) {
+    addBtn.addEventListener("click", () => openSchedModal(null, -1, schedules));
+  }
   toolbar.appendChild(addBtn);
   area.appendChild(toolbar);
 
