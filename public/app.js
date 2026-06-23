@@ -378,7 +378,13 @@ function showSchedModalError(msg) {
 }
 
 async function saveSchedules(schedules) {
-  const res = await apiPost("/api/schedules", { schedules });
+  let res;
+  try {
+    res = await apiPost("/api/schedules", { schedules });
+  } catch (err) {
+    showSchedModalError("Network error — could not save schedule.");
+    return;
+  }
   if (res.error) {
     showSchedModalError(res.error); return;
   }
