@@ -70,13 +70,3 @@ command = "module reload chan_iax2.so"
 label   = "Reload app_rpt"
 command = "module reload app_rpt.so"
 
-[[schedules]]
-label      = "Morning Check"
-node       = 1234
-remote     = 99999
-days       = ["mon", "wed", "fri"]
-connect    = "08:00"
-disconnect = "08:30"
-mode       = "connect"
-permanent  = false
-enabled    = true
