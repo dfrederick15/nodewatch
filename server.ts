@@ -526,8 +526,72 @@ async function _pollNodes(): Promise<void> {
   }
 }
 
+function localDayTime(tz: string): { day: string; time: string } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? "0";
+  const rawHour = get("hour");
+  const hour = rawHour === "24" ? "00" : rawHour.padStart(2, "0");
+  return {
+    day: get("weekday").toLowerCase().slice(0, 3),
+    time: `${hour}:${get("minute").padStart(2, "0")}`,
+  };
+}
+
+function runScheduler(): void {
+  const ilinkCodes: Record<string, [number, number]> = {
+    connect: [3, 13], monitor: [2, 12], localmonitor: [8, 18],
+  };
+
+  setInterval(async () => {
+    const tz = cfg.display.timezone ?? "America/New_York";
+    const { day, time } = localDayTime(tz);
+
+    for (const sched of cfg.schedules ?? []) {
+      if (!sched.enabled) continue;
+      if (!sched.days.includes(day)) continue;
+
+      if (time === sched.connect) {
+        const nodeCfg = cfg.nodes.find(n => n.node === sched.node);
+        if (!nodeCfg) {
+          console.warn(`Scheduler: node ${sched.node} not in config ("${sched.label}")`);
+          continue;
+        }
+        const [temp, perm] = ilinkCodes[sched.mode ?? "connect"] ?? ilinkCodes.connect;
+        const code = sched.permanent ? perm : temp;
+        try {
+          const conn = await ensureConnected(nodeCfg);
+          await conn.client.ilink(conn.socket!, String(sched.node), String(sched.remote), code);
+          console.log(`Scheduler: connected ${sched.node} → ${sched.remote} ("${sched.label}")`);
+        } catch (err) {
+          console.error(`Scheduler: connect failed for "${sched.label}":`, (err as Error).message);
+        }
+      }
+
+      if (sched.disconnect && time === sched.disconnect) {
+        const nodeCfg = cfg.nodes.find(n => n.node === sched.node);
+        if (!nodeCfg) continue;
+        const code = sched.permanent ? 11 : 1;
+        try {
+          const conn = await ensureConnected(nodeCfg);
+          await conn.client.ilink(conn.socket!, String(sched.node), String(sched.remote), code);
+          console.log(`Scheduler: disconnected ${sched.node} ↔ ${sched.remote} ("${sched.label}")`);
+        } catch (err) {
+          console.error(`Scheduler: disconnect failed for "${sched.label}":`, (err as Error).message);
+        }
+      }
+    }
+  }, 60_000);
+}
+
 setInterval(pollNodes, cfg.server.poll_interval_ms);
 pollNodes();
+runScheduler();
 
 // SSE keepalive — comment sent every 25 s prevents NAT/proxy idle timeouts
 setInterval(() => {
