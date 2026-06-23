@@ -503,9 +503,14 @@ async function _pollNodes(): Promise<void> {
         connections: connsFull,
       };
 
-      // Push full status only when something changed
-      const prev = JSON.stringify(lastStatus.get(nodeStr));
-      const curr = JSON.stringify(full);
+      // Push full status only when something structurally changed (ignore volatile
+      // timing fields — those travel via node_times so the diff stays stable).
+      const stripTiming = (f: NodeStatusFull) => ({
+        ...f,
+        connections: f.connections.map(({ elapsed: _e, last_keyed: _lk, ...rest }) => rest),
+      });
+      const prev = JSON.stringify(lastStatus.get(nodeStr) ? stripTiming(lastStatus.get(nodeStr)!) : null);
+      const curr = JSON.stringify(stripTiming(full));
       if (prev !== curr) {
         lastStatus.set(nodeStr, full);
         broadcast("node_status", full);

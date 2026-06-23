@@ -222,6 +222,16 @@ export class AMIClient {
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
 
+// AllStar XStat reports elapsed as either plain seconds or "H:MM:SS" / "MM:SS".
+function parseElapsed(s: string | undefined): number {
+  if (!s) return 0;
+  const parts = s.split(":").map(Number);
+  if (parts.some(isNaN)) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] ?? 0;
+}
+
 function parseNodeStatus(node: string, xstat: string, sawstat: string): NodeStatus {
   const lines = xstat.split("\n");
   const sawLines = sawstat.split("\n");
@@ -274,13 +284,13 @@ function parseNodeStatus(node: string, xstat: string, sawstat: string): NodeStat
   for (const parts of conns) {
     const n = parts[0];
     let direction = parts[3] ?? "";
-    let elapsed = parseInt(parts[4] ?? "0", 10);
+    let elapsed = parseElapsed(parts[4]);
     let link = parts[5] ?? "";
 
     // Shorter IRLP/EchoLink format has fewer columns
     if (!link) {
       direction = parts[2] ?? "";
-      elapsed = parseInt(parts[3] ?? "0", 10);
+      elapsed = parseElapsed(parts[3]);
       if (modes[n]) {
         link = modes[n] === "C" ? "CONNECTING" : "ESTABLISHED";
       }
