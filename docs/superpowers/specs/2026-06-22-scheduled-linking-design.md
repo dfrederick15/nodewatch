@@ -119,10 +119,10 @@ New tab added between Favorites and Settings. Tab label: **Schedule**.
 ### Weekly Grid
 
 - **Columns:** Sun · Mon · Tue · Wed · Thu · Fri · Sat (left to right)
-- **Rows:** 00:00–23:30 in 30-minute slots (scrollable; auto-scrolls to 06:00 on load)
+- **Rows:** 00:00–23:45 in 15-minute slots (scrollable; auto-scrolls to 06:00 on load)
 - **Blocks:** Each enabled schedule renders a colored block spanning its connect→disconnect window in every matching day column
   - Block content: `label` on first line, `→ remote node` on second line
-  - If `disconnect` is omitted, block spans one 30-min slot
+  - If `disconnect` is omitted, block spans one 15-min slot
   - **Active highlight:** if current day+time falls within the block's window, it receives a distinct border/glow
 - **Click on block:** opens Edit modal pre-populated with that entry's values
 - **"＋ Add Schedule" button:** above the grid, opens Add modal with blank fields
