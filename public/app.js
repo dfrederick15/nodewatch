@@ -280,6 +280,112 @@ function buildScheduleGrid(schedules, nodes, onBlockClick) {
   return wrap;
 }
 
+// ── Schedule modal ────────────────────────────────────────────────────────────
+
+function closeSchedModal() {
+  document.getElementById("sched-modal").classList.remove("open");
+}
+
+function openSchedModal(sched, idx, allSchedules) {
+  const modal = document.getElementById("sched-modal");
+  const isEdit = idx >= 0 && sched !== null;
+
+  document.getElementById("sched-modal-title").textContent = isEdit ? "Edit Schedule" : "Add Schedule";
+  document.getElementById("sm-label").value      = sched?.label ?? "";
+  document.getElementById("sm-remote").value     = sched?.remote ?? "";
+  document.getElementById("sm-connect").value    = sched?.connect ?? "";
+  document.getElementById("sm-disconnect").value = sched?.disconnect ?? "";
+  document.getElementById("sm-mode").value       = sched?.mode ?? "connect";
+  document.getElementById("sm-permanent").checked = sched?.permanent ?? false;
+  document.getElementById("sm-enabled").checked   = sched?.enabled ?? true;
+  document.getElementById("sm-error").style.display = "none";
+  document.getElementById("sm-delete").style.display = isEdit ? "" : "none";
+
+  // Populate local node dropdown
+  const nodeSel = document.getElementById("sm-node");
+  nodeSel.innerHTML = "";
+  for (const n of config.nodes) {
+    const opt = document.createElement("option");
+    opt.value = String(n.node);
+    opt.textContent = n.label ? `${n.node} — ${n.label}` : String(n.node);
+    if (sched?.node === n.node) opt.selected = true;
+    nodeSel.appendChild(opt);
+  }
+
+  // Set day checkboxes
+  const dayBoxes = document.querySelectorAll("#sm-days input[type=checkbox]");
+  for (const cb of dayBoxes) {
+    cb.checked = sched?.days?.includes(cb.value) ?? false;
+  }
+
+  // Wire Save (clone-and-replace to avoid duplicate listeners)
+  const saveBtn = document.getElementById("sm-save");
+  const newSave = saveBtn.cloneNode(true);
+  saveBtn.parentNode.replaceChild(newSave, saveBtn);
+  newSave.addEventListener("click", async () => {
+    const days = [...document.querySelectorAll("#sm-days input:checked")].map(c => c.value);
+    if (!days.length) {
+      showSchedModalError("Select at least one day."); return;
+    }
+    const connectVal = document.getElementById("sm-connect").value;
+    if (!connectVal) {
+      showSchedModalError("Connect time is required."); return;
+    }
+    const entry = {
+      label:      document.getElementById("sm-label").value.trim() || "Untitled",
+      node:       Number(document.getElementById("sm-node").value),
+      remote:     Number(document.getElementById("sm-remote").value),
+      days,
+      connect:    connectVal,
+      disconnect: document.getElementById("sm-disconnect").value || undefined,
+      mode:       document.getElementById("sm-mode").value,
+      permanent:  document.getElementById("sm-permanent").checked,
+      enabled:    document.getElementById("sm-enabled").checked,
+    };
+    const updated = [...allSchedules];
+    if (isEdit) updated[idx] = entry;
+    else updated.push(entry);
+    await saveSchedules(updated);
+  });
+
+  // Wire Delete (clone-and-replace to avoid duplicate listeners)
+  const delBtn = document.getElementById("sm-delete");
+  const newDel = delBtn.cloneNode(true);
+  delBtn.parentNode.replaceChild(newDel, delBtn);
+  newDel.style.display = isEdit ? "" : "none";
+  newDel.addEventListener("click", async () => {
+    if (!confirm(`Delete schedule "${sched.label}"?`)) return;
+    const updated = allSchedules.filter((_, i) => i !== idx);
+    await saveSchedules(updated);
+  });
+
+  // Wire Cancel (clone-and-replace to avoid duplicate listeners)
+  const cancelBtn = document.getElementById("sm-cancel");
+  const newCancel = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+  newCancel.addEventListener("click", closeSchedModal);
+
+  // Close on backdrop click (click on the overlay itself, not the box)
+  modal.onclick = (e) => { if (e.target === modal) closeSchedModal(); };
+
+  modal.classList.add("open");
+}
+
+function showSchedModalError(msg) {
+  const el = document.getElementById("sm-error");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+async function saveSchedules(schedules) {
+  const res = await apiPost("/api/schedules", { schedules });
+  if (res.error) {
+    showSchedModalError(res.error); return;
+  }
+  closeSchedModal();
+  loadSchedules();
+}
+
 // ── Tab routing ───────────────────────────────────────────────────────────────
 
 function wireTabs() {

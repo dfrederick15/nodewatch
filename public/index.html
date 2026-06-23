@@ -175,6 +175,67 @@
   </div>
 </div>
 
+<!-- ── Schedule modal ── -->
+<div id="sched-modal">
+  <div class="sched-modal-box">
+    <h3 id="sched-modal-title">Add Schedule</h3>
+    <div class="field-row">
+      <label>Label</label>
+      <input type="text" id="sm-label" placeholder="e.g. Wednesday Net">
+    </div>
+    <div class="field-row">
+      <label>Local Node</label>
+      <select id="sm-node"></select>
+    </div>
+    <div class="field-row">
+      <label>Remote Node</label>
+      <input type="number" id="sm-remote" placeholder="e.g. 67890">
+    </div>
+    <div>
+      <label style="display:block;margin-bottom:6px">Days</label>
+      <div class="sched-days-row" id="sm-days">
+        <label><input type="checkbox" value="sun"> Sun</label>
+        <label><input type="checkbox" value="mon"> Mon</label>
+        <label><input type="checkbox" value="tue"> Tue</label>
+        <label><input type="checkbox" value="wed"> Wed</label>
+        <label><input type="checkbox" value="thu"> Thu</label>
+        <label><input type="checkbox" value="fri"> Fri</label>
+        <label><input type="checkbox" value="sat"> Sat</label>
+      </div>
+    </div>
+    <div class="field-row">
+      <label>Connect Time</label>
+      <input type="time" id="sm-connect">
+    </div>
+    <div class="field-row">
+      <label>Disconnect Time <span class="muted" style="font-size:11px">(optional)</span></label>
+      <input type="time" id="sm-disconnect">
+    </div>
+    <div class="field-row">
+      <label>Mode</label>
+      <select id="sm-mode">
+        <option value="connect">Connect</option>
+        <option value="monitor">Monitor</option>
+        <option value="localmonitor">Local Monitor</option>
+      </select>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="sm-permanent">
+      <label for="sm-permanent">Permanent link (survives rpt restart)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="sm-enabled" checked>
+      <label for="sm-enabled">Enabled</label>
+    </div>
+    <div class="sched-modal-error" id="sm-error"></div>
+    <div class="sched-modal-actions">
+      <button id="sm-delete" class="danger" style="margin-right:auto;display:none">Delete</button>
+      <button id="sm-cancel">Cancel</button>
+      <button id="sm-save" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 
 <footer id="site-footer">
