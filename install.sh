@@ -89,7 +89,10 @@ done
 if $UPDATE_ONLY; then
   [[ -d "$INSTALL_DIR/.git" ]] || die "$INSTALL_DIR not found. Run without --update to do a fresh install."
   step "Pulling latest code..."
+  [[ -f "$CONFIG" ]] && cp "$CONFIG" "/tmp/nodewatch_config.toml"
+  git -C "$INSTALL_DIR" checkout -- config.toml 2>/dev/null || true
   git -C "$INSTALL_DIR" pull -q
+  [[ -f "/tmp/nodewatch_config.toml" ]] && cp "/tmp/nodewatch_config.toml" "$CONFIG" && info "config.toml preserved"
   npm --prefix "$INSTALL_DIR" install --omit=dev --silent
   cp "$INSTALL_DIR/nodewatch-ctl" "/usr/local/bin/nodewatch"
   chmod +x "/usr/local/bin/nodewatch"
@@ -132,7 +135,10 @@ fi
 step "Installing nodewatch to $INSTALL_DIR..."
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   info "Repository already exists — pulling latest"
+  [[ -f "$CONFIG" ]] && cp "$CONFIG" "/tmp/nodewatch_config.toml"
+  git -C "$INSTALL_DIR" checkout -- config.toml 2>/dev/null || true
   git -C "$INSTALL_DIR" pull -q
+  [[ -f "/tmp/nodewatch_config.toml" ]] && cp "/tmp/nodewatch_config.toml" "$CONFIG" && info "config.toml preserved"
 else
   info "Cloning from $REPO"
   git clone -q "$REPO" "$INSTALL_DIR"
