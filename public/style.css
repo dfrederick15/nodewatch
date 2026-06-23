@@ -1,3 +1,168 @@
 /* Redirect — active theme is loaded via theme-amber.css or theme-slate.css.
    This file is kept so any hard-coded references don't 404. */
 @import url("theme-amber.css");
+
+/* ── Schedule tab ──────────────────────────────────────────────────────────── */
+
+#schedule-area {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sched-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sched-wrapper {
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  position: relative;
+}
+
+.sched-header {
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+}
+
+.sched-header-corner { padding: 6px; }
+
+.sched-day-hdr {
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  border-left: 1px solid var(--border);
+}
+
+.sched-body {
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  grid-template-rows: repeat(96, 16px);
+  position: relative;
+}
+
+.sched-time-lbl {
+  font-size: 10px;
+  color: var(--muted);
+  padding-right: 6px;
+  text-align: right;
+  line-height: 16px;
+  white-space: nowrap;
+  align-self: start;
+}
+
+.sched-cell {
+  border-left: 1px solid var(--border);
+  border-top: 1px solid transparent;
+}
+
+.sched-cell.hour-line {
+  border-top-color: var(--border);
+}
+
+.sched-block {
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+  overflow: hidden;
+  cursor: pointer;
+  opacity: 0.85;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 2px;
+  box-sizing: border-box;
+  transition: opacity 0.15s;
+}
+
+.sched-block:hover { opacity: 1; }
+
+.sched-block.active {
+  box-shadow: 0 0 0 2px var(--accent);
+  opacity: 1;
+}
+
+.sched-block.disabled { opacity: 0.35; }
+
+.sched-block-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+
+.sched-block-node {
+  font-size: 10px;
+  color: rgba(255,255,255,0.8);
+  white-space: nowrap;
+}
+
+/* ── Schedule modal ─────────────────────────────────────────────────────────── */
+
+#sched-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+
+#sched-modal.open { display: flex; }
+
+.sched-modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px;
+  width: 420px;
+  max-width: 95vw;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sched-modal-box h3 { margin: 0; font-size: 15px; }
+
+.sched-days-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sched-days-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sched-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.sched-modal-error {
+  color: var(--red);
+  font-size: 13px;
+  display: none;
+}

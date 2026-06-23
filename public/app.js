@@ -155,6 +155,131 @@ function tickClock() {
   if (el) el.textContent = `${hh}:${mm}:${ss}`;
 }
 
+// ── Schedule helpers ──────────────────────────────────────────────────────────
+
+function timeToSlot(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 4 + Math.floor(m / 15);
+}
+
+function localDayTimeClient() {
+  const tz = config?.display?.timezone ?? "America/New_York";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date());
+  const get = (t) => parts.find(p => p.type === t)?.value ?? "0";
+  const rawHour = get("hour");
+  const hour = rawHour === "24" ? "00" : rawHour.padStart(2, "0");
+  return {
+    day: get("weekday").toLowerCase().slice(0, 3),
+    time: `${hour}:${get("minute").padStart(2, "0")}`,
+  };
+}
+
+function isSchedActive(sched) {
+  const { day, time } = localDayTimeClient();
+  if (!sched.days.includes(day)) return false;
+  if (time < sched.connect) return false;
+  if (sched.disconnect && time >= sched.disconnect) return false;
+  return true;
+}
+
+const SCHED_COLORS = [
+  "#4a6fa5", "#5a8a5a", "#8a5a4a", "#7a5a8a", "#8a7a4a", "#4a8a8a", "#8a5a6a",
+];
+const DAYS_ORDER = ["sun","mon","tue","wed","thu","fri","sat"];
+const DAYS_LABEL = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const DAY_COL    = { sun:2, mon:3, tue:4, wed:5, thu:6, fri:7, sat:8 };
+
+function buildScheduleGrid(schedules, nodes, onBlockClick) {
+  const wrap = document.createElement("div");
+  wrap.className = "sched-wrapper";
+
+  // Sticky header
+  const hdr = document.createElement("div");
+  hdr.className = "sched-header";
+  const corner = document.createElement("div");
+  corner.className = "sched-header-corner";
+  hdr.appendChild(corner);
+  for (const lbl of DAYS_LABEL) {
+    const d = document.createElement("div");
+    d.className = "sched-day-hdr";
+    d.textContent = lbl;
+    hdr.appendChild(d);
+  }
+  wrap.appendChild(hdr);
+
+  // Body grid
+  const body = document.createElement("div");
+  body.className = "sched-body";
+
+  // Time labels and background cells
+  for (let slot = 0; slot < 96; slot++) {
+    const h = Math.floor(slot / 4);
+    const m = (slot % 4) * 15;
+    const isHour = m === 0;
+    const row = slot + 1;  // grid rows are 1-indexed
+
+    const lbl = document.createElement("div");
+    lbl.className = "sched-time-lbl";
+    lbl.style.gridRow = String(row);
+    lbl.style.gridColumn = "1";
+    if (isHour) lbl.textContent = `${String(h).padStart(2,"0")}:00`;
+    body.appendChild(lbl);
+
+    for (let d = 0; d < 7; d++) {
+      const cell = document.createElement("div");
+      cell.className = "sched-cell" + (isHour ? " hour-line" : "");
+      cell.style.gridRow = String(row);
+      cell.style.gridColumn = String(d + 2);
+      body.appendChild(cell);
+    }
+  }
+
+  // Schedule blocks
+  schedules.forEach((sched, idx) => {
+    const startSlot = timeToSlot(sched.connect);
+    const endSlot   = sched.disconnect ? timeToSlot(sched.disconnect) : startSlot + 1;
+    const color     = SCHED_COLORS[idx % SCHED_COLORS.length];
+    const active    = isSchedActive(sched);
+
+    for (const day of sched.days) {
+      const col = DAY_COL[day];
+      if (!col) continue;
+
+      const block = document.createElement("div");
+      block.className = "sched-block"
+        + (active ? " active" : "")
+        + (!sched.enabled ? " disabled" : "");
+      block.style.gridRow    = `${startSlot + 1} / ${endSlot + 1}`;
+      block.style.gridColumn = String(col);
+      block.style.backgroundColor = color;
+
+      const labelEl = document.createElement("span");
+      labelEl.className = "sched-block-label";
+      labelEl.textContent = sched.label;
+
+      const nodeEl = document.createElement("span");
+      nodeEl.className = "sched-block-node";
+      nodeEl.textContent = `→ ${sched.remote}`;
+
+      block.appendChild(labelEl);
+      block.appendChild(nodeEl);
+      block.addEventListener("click", () => onBlockClick(sched, idx));
+      body.appendChild(block);
+    }
+  });
+
+  wrap.appendChild(body);
+
+  // Auto-scroll to 06:00 on load
+  requestAnimationFrame(() => {
+    wrap.scrollTop = 6 * 4 * 16; // slot 24 * 16px row height
+  });
+
+  return wrap;
+}
+
 // ── Tab routing ───────────────────────────────────────────────────────────────
 
 function wireTabs() {
@@ -909,10 +1034,30 @@ async function generateProvisionCommand(panel) {
 
 async function loadSchedules() {
   const area = document.getElementById("schedule-area");
-  area.textContent = "Loading…";
+  area.innerHTML = "";
+
   const res = await fetch("/api/schedules");
+  if (!res.ok) {
+    area.innerHTML = `<div class="error">Failed to load schedules.</div>`;
+    return;
+  }
   const data = await res.json();
-  area.textContent = `${(data.schedules ?? []).length} schedule(s) loaded.`;
+  const schedules = data.schedules ?? [];
+
+  // Toolbar
+  const toolbar = document.createElement("div");
+  toolbar.className = "sched-toolbar";
+  const addBtn = document.createElement("button");
+  addBtn.className = "primary";
+  addBtn.textContent = "+ Add Schedule";
+  addBtn.addEventListener("click", () => openSchedModal(null, -1, schedules));
+  toolbar.appendChild(addBtn);
+  area.appendChild(toolbar);
+
+  // Grid
+  const grid = buildScheduleGrid(schedules, config.nodes,
+    (sched, idx) => openSchedModal(sched, idx, schedules));
+  area.appendChild(grid);
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
