@@ -169,3 +169,31 @@ command = "module reload chan_iax2.so"
 [[commands]]
 label   = "Reload app_rpt"
 command = "module reload app_rpt.so"
+
+
+# -----------------------------------------------------------------------------
+# [[schedules]] — automated connect/disconnect schedules
+# -----------------------------------------------------------------------------
+# Each schedule defines when a local node connects to or disconnects from
+# a remote node on a recurring basis.
+#
+# label      — Display name for this schedule
+# node       — Local AllStar node number
+# remote     — Remote node number to connect/disconnect
+# days       — Days of the week: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+# connect    — Time to connect, format "HH:MM" (interpreted in cfg.display.timezone)
+# disconnect — Time to disconnect, format "HH:MM" (optional; omit for connect-only)
+# mode       — "connect" | "monitor" | "localmonitor"
+# permanent  — true for permanent connect (ilink 13), false for temporary (ilink 3)
+# enabled    — true to use this schedule, false to ignore it
+
+[[schedules]]
+label      = "Test Net"
+node       = 1234
+remote     = 99999
+days       = ["wed"]
+connect    = "19:00"
+disconnect = "20:00"
+mode       = "connect"
+permanent  = false
+enabled    = true

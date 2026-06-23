@@ -99,6 +99,18 @@ interface NodeConfig {
   website_url?: string;
 }
 
+interface Schedule {
+  label: string;
+  node: number;
+  remote: number;
+  days: string[];       // ["sun","mon","tue","wed","thu","fri","sat"] subset
+  connect: string;      // "HH:MM"
+  disconnect?: string;  // "HH:MM" — omit for connect-only
+  mode: string;         // "connect" | "monitor" | "localmonitor"
+  permanent: boolean;
+  enabled: boolean;
+}
+
 interface Config {
   server: {
     port: number;
@@ -122,6 +134,7 @@ interface Config {
   };
   nodes: NodeConfig[];
   commands: { label: string; command: string }[];
+  schedules?: Schedule[];
   favorites?: { nodes: number[] };
 }
 
@@ -187,6 +200,19 @@ function serializeConfig(c: Config): string {
     L.push("[[commands]]");
     L.push(`label   = ${tomlStr(cmd.label)}`);
     L.push(`command = ${tomlStr(cmd.command)}`);
+    L.push("");
+  }
+  for (const s of c.schedules ?? []) {
+    L.push("[[schedules]]");
+    L.push(`label      = ${tomlStr(s.label)}`);
+    L.push(`node       = ${Number(s.node)}`);
+    L.push(`remote     = ${Number(s.remote)}`);
+    L.push(`days       = [${s.days.map(d => tomlStr(d)).join(", ")}]`);
+    L.push(`connect    = ${tomlStr(s.connect)}`);
+    if (s.disconnect) L.push(`disconnect = ${tomlStr(s.disconnect)}`);
+    L.push(`mode       = ${tomlStr(s.mode ?? "connect")}`);
+    L.push(`permanent  = ${s.permanent ?? false}`);
+    L.push(`enabled    = ${s.enabled ?? true}`);
     L.push("");
   }
   return L.join("\n");
