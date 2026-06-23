@@ -756,6 +756,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/api/schedules" && req.method === "GET") {
+    const list = (cfg.schedules ?? []).map((s, i) => ({ ...s, id: i }));
+    json(res, 200, { schedules: list });
+    return;
+  }
+
   // ── Favorites status (public) ─────────────────────────────────────────────
   // Returns live data for each node in cfg.favorites.nodes by querying the
   // AllStar stats API. Results are not cached here — the client polls at its
@@ -858,6 +864,19 @@ const server = http.createServer(async (req, res) => {
       }
       fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
       json(res, 200, { ok: true, nodes: cfg.favorites.nodes });
+      return;
+    }
+
+    if (pathname === "/api/schedules" && req.method === "POST") {
+      if (!requireAuth(req, res)) return;
+      const body = await readBody(req) as unknown as { schedules: Schedule[] };
+      if (!Array.isArray(body.schedules)) {
+        json(res, 400, { error: "schedules must be an array" }); return;
+      }
+      cfg.schedules = body.schedules;
+      if (fs.existsSync(configPath)) fs.copyFileSync(configPath, configPath + ".bak");
+      fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
+      json(res, 200, { ok: true });
       return;
     }
 

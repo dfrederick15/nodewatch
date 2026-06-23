@@ -1,102 +1,28 @@
-# =============================================================================
 # AllStar Node Monitor — Configuration
-# =============================================================================
-# Edit this file to match your setup, then restart: npm start
-# Format: TOML  https://toml.io
-# =============================================================================
+# Saved by nodewatch settings panel. Restart to apply changes.
 
-
-# -----------------------------------------------------------------------------
 [server]
-# -----------------------------------------------------------------------------
-
-# Port the web UI listens on.
-port = 8080
-
-# Bind address.
-#   "0.0.0.0"   — all interfaces (accessible from the network)
-#   "127.0.0.1" — localhost only
-host = "0.0.0.0"
-
-# How often (ms) to poll Asterisk for node status updates.
-# Lower = more responsive. Higher = less load on Asterisk.
-# Range: 500–10000
-poll_interval_ms = 1000
-
-# Seconds to wait when opening a TCP socket to Asterisk Manager.
+port                 = 8080
+host                 = "0.0.0.0"
+poll_interval_ms     = 1000
 ami_connect_timeout_s = 5
+ami_read_timeout_s   = 5
 
-# Seconds to wait for a response after sending an AMI command.
-# Increase if Asterisk is on a slow or remote host.
-ami_read_timeout_s = 5
-
-
-# -----------------------------------------------------------------------------
 [auth]
-# -----------------------------------------------------------------------------
-# Login credentials for the control interface.
-# The UI is read-only when not logged in.
-
-username = "admin"
-password = "changeme"
-
-# Session lifetime in seconds before auto-logout.
-#   3600  = 1 hour
-#   86400 = 24 hours
+username         = "admin"
+password         = "changeme"
 session_timeout_s = 3600
 
-
-# -----------------------------------------------------------------------------
 [display]
-# -----------------------------------------------------------------------------
-
-# Station identification shown in the page header.
-callsign = "W1ABC"
-title    = "AllStar Monitor"
-location = "Anytown, USA"
-
-# Maximum connected nodes shown per local node. 0 = show all.
-max_nodes = 0
-
-# Include nodes that have never transmitted (last heard = "Never").
-#   true  — show them
-#   false — hide them
+callsign         = "W1ABC"
+title            = "AllStar Monitor"
+location         = "Anytown, USA"
+max_nodes        = 0
 show_never_heard = true
+timezone         = "America/New_York"
 
-# IANA timezone for log timestamps.
-# Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-# Examples: "America/New_York" | "America/Chicago" | "America/Los_Angeles" | "UTC"
-timezone = "America/New_York"
-
-
-# -----------------------------------------------------------------------------
 [favorites]
-# -----------------------------------------------------------------------------
-# AllStar node numbers to track in the Favorites tab.
-# The Favorites tab polls the AllStar stats API for each node's live status
-# (connections, keyed state) and displays them in a list.
-#
-# Add/remove nodes directly here, or use the Favorites tab in the web UI.
-
 nodes = []
-
-
-# -----------------------------------------------------------------------------
-# [[nodes]] — one block per local AllStar node
-# -----------------------------------------------------------------------------
-# Copy this section to add more nodes.
-#
-# node      — AllStar node number
-# host      — IP or hostname of the Asterisk server for this node
-#             Same machine: "127.0.0.1"
-#             Custom port:  "192.168.1.10:5038"  (default port is 5038)
-# user      — Asterisk Manager username  (see /etc/asterisk/manager.conf)
-# password  — Asterisk Manager password
-# label     — Friendly name shown in the UI (optional)
-# private   — true = hide the AllStar stats hyperlink for this node
-#             Options: true | false
-# stream_url — URL to a live audio stream (optional, shown as a button)
-# website_url — URL to a web page for this node (optional)
 
 [[nodes]]
 node        = 1234
@@ -107,32 +33,6 @@ label       = "Home Node"
 private     = false
 stream_url  = ""
 website_url = ""
-
-# [[nodes]]
-# node        = 5678
-# host        = "192.168.1.50"
-# user        = "admin"
-# password    = "secret"
-# label       = "Repeater"
-# private     = false
-
-
-# -----------------------------------------------------------------------------
-# [[commands]] — control panel dropdown entries
-# -----------------------------------------------------------------------------
-# Each entry appears as an option in the Control Panel.
-# Use %node% as a placeholder for the local node number.
-#
-# Common Asterisk CLI commands for AllStar:
-#   rpt xnode %node%       — Extended node status
-#   rpt lstats %node%      — Link statistics
-#   rpt fun %node% *70     — Disable link activity
-#   rpt fun %node% *71     — Enable link activity
-#   core show version      — Asterisk version string
-#   core show channels     — Active channels
-#   dialplan reload        — Reload dialplan (no restart needed)
-#   module reload chan_iax2.so   — Reload IAX2 channel driver
-#   module reload app_rpt.so     — Reload app_rpt (AllStar module)
 
 [[commands]]
 label   = "Node Status"
@@ -170,30 +70,13 @@ command = "module reload chan_iax2.so"
 label   = "Reload app_rpt"
 command = "module reload app_rpt.so"
 
-
-# -----------------------------------------------------------------------------
-# [[schedules]] — automated connect/disconnect schedules
-# -----------------------------------------------------------------------------
-# Each schedule defines when a local node connects to or disconnects from
-# a remote node on a recurring basis.
-#
-# label      — Display name for this schedule
-# node       — Local AllStar node number
-# remote     — Remote node number to connect/disconnect
-# days       — Days of the week: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
-# connect    — Time to connect, format "HH:MM" (interpreted in cfg.display.timezone)
-# disconnect — Time to disconnect, format "HH:MM" (optional; omit for connect-only)
-# mode       — "connect" | "monitor" | "localmonitor"
-# permanent  — true for permanent connect (ilink 13), false for temporary (ilink 3)
-# enabled    — true to use this schedule, false to ignore it
-
 [[schedules]]
-label      = "Test Net"
+label      = "Morning Check"
 node       = 1234
 remote     = 99999
-days       = ["wed"]
-connect    = "19:00"
-disconnect = "20:00"
+days       = ["mon", "wed", "fri"]
+connect    = "08:00"
+disconnect = "08:30"
 mode       = "connect"
 permanent  = false
 enabled    = true
