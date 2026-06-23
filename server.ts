@@ -908,8 +908,8 @@ const server = http.createServer(async (req, res) => {
       }
       if (fs.existsSync(configPath)) fs.copyFileSync(configPath, configPath + ".bak");
       fs.writeFileSync(configPath, serializeConfig(newCfg), "utf8");
-      json(res, 200, { ok: true, message: "Config saved. Server restarting…" });
-      setTimeout(() => process.exit(0), 500);
+      Object.assign(cfg, newCfg);
+      json(res, 200, { ok: true, message: "Config saved." });
       return;
     }
 

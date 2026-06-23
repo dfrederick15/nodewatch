@@ -7,7 +7,7 @@
  *  Home      — Live node status panels from SSE; connect/disconnect controls.
  *  Favorites — Polls /api/favorites/status every 30 s; shows network-wide status
  *              for saved nodes. Add/remove nodes (auth required).
- *  Settings  — Full config.toml editor. Saves to server and triggers a restart.
+ *  Settings  — Full config.toml editor. Saves to server; reloads the page.
  */
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -1056,18 +1056,8 @@ async function _saveSettingsInner(originalCfg, setMsg) {
     const data = await res.json();
     if (!data.ok) { setMsg(data.error || "Save failed.", "error"); return; }
 
-    setMsg("Saved. Server restarting…", "ok");
-    // Poll until the server is back up, then reload
-    setTimeout(async () => {
-      for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 1000));
-        try {
-          const check = await fetch("/api/session");
-          if (check.ok) { window.location.reload(); return; }
-        } catch (_) {}
-      }
-      setMsg("Server did not respond — check: journalctl -u nodewatch", "error");
-    }, 800);
+    setMsg("Saved.", "ok");
+    setTimeout(() => window.location.reload(), 500);
   } catch (_) {
     setMsg("Network error — could not reach server.", "error");
   }
