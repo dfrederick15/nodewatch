@@ -174,6 +174,7 @@ function switchTab(name) {
   document.getElementById("main-layout").classList.toggle("wide", wide);
 
   if (name === "favorites") loadFavorites();
+  if (name === "schedule")  loadSchedules();
   if (name === "settings")  loadSettings();
 }
 
@@ -902,6 +903,16 @@ async function generateProvisionCommand(panel) {
     btn.disabled = false;
     btn.textContent = "Generate Provision Command";
   }
+}
+
+// ── Schedule tab ──────────────────────────────────────────────────────────────
+
+async function loadSchedules() {
+  const area = document.getElementById("schedule-area");
+  area.textContent = "Loading…";
+  const res = await fetch("/api/schedules");
+  const data = await res.json();
+  area.textContent = `${(data.schedules ?? []).length} schedule(s) loaded.`;
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
