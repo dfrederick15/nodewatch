@@ -1,7 +1,3 @@
-/* Redirect — active theme is loaded via theme-amber.css or theme-slate.css.
-   This file is kept so any hard-coded references don't 404. */
-@import url("theme-amber.css");
-
 /* ── Schedule tab ──────────────────────────────────────────────────────────── */
 
 #schedule-area {
