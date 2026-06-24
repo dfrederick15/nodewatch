@@ -136,6 +136,13 @@ interface Config {
   commands: { label: string; command: string }[];
   schedules?: Schedule[];
   favorites?: { nodes: number[] };
+  mobile_tokens?: MobileToken[];
+}
+
+interface MobileToken {
+  token: string;
+  label: string;     // device name, for display in settings
+  created: number;   // Unix ms
 }
 
 const configPath = new URL("./config.toml", import.meta.url).pathname;
@@ -213,6 +220,13 @@ function serializeConfig(c: Config): string {
     L.push(`mode       = ${tomlStr(s.mode ?? "connect")}`);
     L.push(`permanent  = ${s.permanent ?? false}`);
     L.push(`enabled    = ${s.enabled ?? true}`);
+    L.push("");
+  }
+  for (const t of c.mobile_tokens ?? []) {
+    L.push("[[mobile_tokens]]");
+    L.push(`token   = ${tomlStr(t.token)}`);
+    L.push(`label   = ${tomlStr(t.label)}`);
+    L.push(`created = ${t.created}`);
     L.push("");
   }
   return L.join("\n");
@@ -315,6 +329,17 @@ async function fetchSubnodes(nodeNum: string): Promise<SubnodeEntry[]> {
 
 interface Session { username: string; expires: number; }
 const sessions = new Map<string, Session>();
+
+// ── Mobile token store ────────────────────────────────────────────────────────
+// Long-lived bearer tokens for the Android/iOS app. Persisted to config.toml.
+const mobileTokens = new Map<string, MobileToken>();
+
+function loadMobileTokens(): void {
+  for (const t of cfg.mobile_tokens ?? []) {
+    mobileTokens.set(t.token, t);
+  }
+}
+loadMobileTokens();
 
 function createSession(username: string): string {
   const token = crypto.randomBytes(32).toString("hex");
@@ -716,10 +741,22 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): Session | null {
-  const s = sessionFromReq(req);
-  if (!s) { json(res, 401, { error: "Not logged in" }); return null; }
-  return s;
+function tokenFromReq(req: http.IncomingMessage): string | undefined {
+  const auth = req.headers["authorization"];
+  if (auth?.startsWith("Bearer ")) return auth.slice(7);
+  return undefined;
+}
+
+function isAuthedReq(req: http.IncomingMessage): boolean {
+  const bearer = tokenFromReq(req);
+  if (bearer && mobileTokens.has(bearer)) return true;
+  return !!sessionFromReq(req);
+}
+
+function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (isAuthedReq(req)) return true;
+  json(res, 401, { error: "Not logged in" });
+  return false;
 }
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
@@ -753,6 +790,22 @@ const server = http.createServer(async (req, res) => {
       "Set-Cookie": "asl_session=; HttpOnly; Path=/; Max-Age=0",
     });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (pathname === "/api/token" && req.method === "POST") {
+    const body = await readBody(req);
+    if (body.username !== cfg.auth.username || body.password !== cfg.auth.password) {
+      json(res, 401, { error: "Invalid credentials" });
+      return;
+    }
+    const token = crypto.randomBytes(32).toString("hex");
+    const label = (body.label ?? "Mobile").slice(0, 64);
+    const entry: MobileToken = { token, label, created: Date.now() };
+    mobileTokens.set(token, entry);
+    cfg.mobile_tokens = [...(cfg.mobile_tokens ?? []), entry];
+    fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
+    json(res, 200, { token });
     return;
   }
 
@@ -965,20 +1018,20 @@ const server = http.createServer(async (req, res) => {
       "X-Accel-Buffering": "no",
       Connection: "keep-alive",
     });
-    const sseSession = sessionFromReq(req);
+    const sseAuthed = isAuthedReq(req);
     // Send current known state immediately so page isn't blank on load
     for (const status of lastStatus.values()) {
       res.write(`event: node_status\ndata: ${JSON.stringify(status)}\n\n`);
     }
     // Replay console ring buffer — authenticated clients only
-    if (sseSession) {
+    if (sseAuthed) {
       for (const [node, lines] of consoleHistory) {
         for (const text of lines) {
           res.write(`event: console_line\ndata: ${JSON.stringify({ node, text })}\n\n`);
         }
       }
     }
-    const client: SSEClient = { res, authed: !!sseSession };
+    const client: SSEClient = { res, authed: sseAuthed };
     sseClients.add(client);
     req.on("close", () => sseClients.delete(client));
     return;
