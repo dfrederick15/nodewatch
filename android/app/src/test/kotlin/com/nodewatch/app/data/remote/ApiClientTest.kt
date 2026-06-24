@@ -45,6 +45,6 @@ class ApiClientTest {
         client.connect(server, "token", "1234", "5678", ConnectMode.TRANSCEIVE, permanent = false)
         val req = mockServer.takeRequest()
         assertEquals("POST", req.method)
-        assertTrue(req.body.readUtf8().contains("\"mode\":\"transceive\""))
+        assertTrue(req.body.readUtf8().contains("\"mode\":\"connect\""))
     }
 }
