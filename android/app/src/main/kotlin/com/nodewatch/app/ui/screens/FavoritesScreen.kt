@@ -38,11 +38,11 @@ fun FavoritesScreen(
             items(favorites, key = { it.node }) { fav ->
                 ListItem(
                     headlineContent = { Text("Node ${fav.node}") },
-                    supportingContent = { Text(fav.callsign) },
+                    supportingContent = { Text(fav.info) },
                     leadingContent = {
                         Surface(
                             shape = MaterialTheme.shapes.small,
-                            color = if (fav.connected) Color(0xFF4CAF50) else Color(0xFF424242),
+                            color = if (fav.isConnected) Color(0xFF4CAF50) else Color(0xFF424242),
                             modifier = Modifier.size(12.dp),
                         ) {}
                     },

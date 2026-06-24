@@ -51,9 +51,13 @@ data class NodeTimes(
 @Serializable
 data class FavoriteNodeStatus(
     val node: String,
-    @SerialName("callsign") val callsign: String = "",
-    @SerialName("connected") val connected: Boolean = false,
-)
+    val info: String = "",
+    val status: String = "offline",
+    @SerialName("connection_count") val connectionCount: Int = 0,
+    val keyed: Boolean = false,
+) {
+    val isConnected: Boolean get() = status == "online"
+}
 
 sealed class ServerEvent {
     data class NodeStatusEvent(val status: NodeStatus) : ServerEvent()
