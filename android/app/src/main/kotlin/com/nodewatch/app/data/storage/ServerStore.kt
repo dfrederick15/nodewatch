@@ -25,7 +25,7 @@ class ServerStore @Inject constructor(@ApplicationContext private val ctx: Conte
         runCatching { Json.decodeFromString<List<Server>>(raw) }.getOrDefault(emptyList())
     }
 
-    suspend fun save(server: Server) = edit { list -> list + server }
+    suspend fun save(server: Server) = edit { list -> if (list.any { it.id == server.id }) list else list + server }
     suspend fun update(server: Server) = edit { list -> list.map { if (it.id == server.id) server else it } }
     suspend fun delete(id: String) = edit { list -> list.filter { it.id != id } }
 

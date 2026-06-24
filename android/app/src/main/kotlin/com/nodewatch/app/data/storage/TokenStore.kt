@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,10 +26,14 @@ class TokenStore @Inject constructor(@ApplicationContext private val ctx: Contex
     fun getToken(serverId: String): String? = prefs.getString(serverId, null)
 
     suspend fun setToken(serverId: String, token: String) {
-        prefs.edit().putString(serverId, token).apply()
+        withContext(Dispatchers.IO) {
+            prefs.edit().putString(serverId, token).apply()
+        }
     }
 
     suspend fun deleteToken(serverId: String) {
-        prefs.edit().remove(serverId).apply()
+        withContext(Dispatchers.IO) {
+            prefs.edit().remove(serverId).apply()
+        }
     }
 }
