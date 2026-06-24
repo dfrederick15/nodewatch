@@ -809,6 +809,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/api/token" && req.method === "DELETE") {
+    const bearer = tokenFromReq(req);
+    if (!bearer || !mobileTokens.has(bearer)) {
+      json(res, 401, { error: "Not logged in" });
+      return;
+    }
+    mobileTokens.delete(bearer);
+    cfg.mobile_tokens = (cfg.mobile_tokens ?? []).filter(t => t.token !== bearer);
+    fs.writeFileSync(configPath, serializeConfig(cfg), "utf8");
+    json(res, 200, { ok: true });
+    return;
+  }
+
   // ── Public read-only endpoints ────────────────────────────────────────────
 
   if (pathname === "/api/session") {
