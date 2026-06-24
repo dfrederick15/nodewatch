@@ -475,7 +475,7 @@ function handleAmiEvent(node: string, fields: Record<string, string>): void {
   hist.push(line);
   if (hist.length > CONSOLE_MAX) hist.shift();
   consoleHistory.set(node, hist);
-  broadcast("console_line", { node, text: line });
+  broadcastAuthed("console_line", { node, text: line });
 }
 
 function startEventStreams(): void {
@@ -505,7 +505,7 @@ function startEventStreams(): void {
 
 // ── SSE broadcaster ───────────────────────────────────────────────────────────
 
-interface SSEClient { res: http.ServerResponse; }
+interface SSEClient { res: http.ServerResponse; authed: boolean; }
 const sseClients = new Set<SSEClient>();
 
 function sseWrite(client: SSEClient, event: string, data: unknown): void {
@@ -515,6 +515,10 @@ function sseWrite(client: SSEClient, event: string, data: unknown): void {
 
 function broadcast(event: string, data: unknown): void {
   for (const c of sseClients) sseWrite(c, event, data);
+}
+
+function broadcastAuthed(event: string, data: unknown): void {
+  for (const c of sseClients) if (c.authed) sseWrite(c, event, data);
 }
 
 // ── Extended status type (status + subnodes + info) ───────────────────────────
@@ -897,6 +901,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === "/api/console/history" && req.method === "GET") {
+    if (!requireAuth(req, res)) return;
     const node = url.searchParams.get("node") ?? "";
     json(res, 200, { node, lines: consoleHistory.get(node) ?? [] });
     return;
@@ -960,17 +965,20 @@ const server = http.createServer(async (req, res) => {
       "X-Accel-Buffering": "no",
       Connection: "keep-alive",
     });
+    const sseSession = sessionFromReq(req);
     // Send current known state immediately so page isn't blank on load
     for (const status of lastStatus.values()) {
       res.write(`event: node_status\ndata: ${JSON.stringify(status)}\n\n`);
     }
-    // Replay console ring buffer so the Console tab pre-fills on connect
-    for (const [node, lines] of consoleHistory) {
-      for (const text of lines) {
-        res.write(`event: console_line\ndata: ${JSON.stringify({ node, text })}\n\n`);
+    // Replay console ring buffer — authenticated clients only
+    if (sseSession) {
+      for (const [node, lines] of consoleHistory) {
+        for (const text of lines) {
+          res.write(`event: console_line\ndata: ${JSON.stringify({ node, text })}\n\n`);
+        }
       }
     }
-    const client: SSEClient = { res };
+    const client: SSEClient = { res, authed: !!sseSession };
     sseClients.add(client);
     req.on("close", () => sseClients.delete(client));
     return;

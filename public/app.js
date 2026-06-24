@@ -482,6 +482,9 @@ function connectSSE() {
     clearTimeout(sseErrorTimer);
     sseErrorTimer = setTimeout(() => setStatusDot("error"), 2500);
   };
+
+  // Reattach console listener on any reconnect so it survives SSE restarts
+  if (consoleListener) sseSource.addEventListener("console_line", consoleListener);
 }
 
 function tick() {
@@ -758,6 +761,13 @@ let consoleListener = null;
 async function loadConsole() {
   const area = document.getElementById("console-area");
   if (!area) return;
+
+  if (!loggedIn) {
+    if (!area.dataset.loaded) {
+      area.innerHTML = `<div class="console-login-msg">Log in to view the Asterisk console.</div>`;
+    }
+    return;
+  }
 
   // Only build the UI once; subsequent tab switches just keep the existing DOM
   if (!area.dataset.loaded) {
@@ -1379,8 +1389,14 @@ function wireLoginDialog() {
       close();
       const username = document.getElementById("dlg-user").value.trim();
       setLoggedIn(true, username);
+      // Reconnect SSE so the server sees the auth cookie on the stream
+      connectSSE();
+      // Reset console area so loadConsole rebuilds with the authenticated stream
+      const ca = document.getElementById("console-area");
+      if (ca) { ca.dataset.loaded = ""; ca.innerHTML = ""; }
       if (currentTab === "settings") loadSettings();
       if (currentTab === "favorites") loadFavorites();
+      if (currentTab === "console") loadConsole();
       const sess = await fetch("/api/session").then(r => r.json());
       if (sess.must_change_password) {
         showChangePasswordDialog("The default password must be changed before you continue.", true);

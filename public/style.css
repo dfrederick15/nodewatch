@@ -209,6 +209,12 @@
 #console-output .line-error { color: var(--red, #f87171); }
 #console-output .line-warn  { color: #e6c84a; }
 
+.console-login-msg {
+  padding: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* ── Clock local time ─────────────────────────────────────────────────────── */
 
 .clock-sep {
