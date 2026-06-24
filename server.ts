@@ -439,6 +439,70 @@ async function ensureConnected(nodeCfg: NodeConfig): Promise<HostConn> {
   return conn;
 }
 
+// ── AMI event stream (console output) ────────────────────────────────────────
+// A second AMI connection per host, logged in with EVENTS: on, captures
+// VerboseMessage and other AMI events for the Console tab.
+
+const CONSOLE_MAX = 500;
+const consoleHistory = new Map<string, string[]>();  // nodeStr → recent lines
+
+interface EventConn {
+  socket: import("node:net").Socket | null;
+  cleanup: (() => void) | null;
+  client: AMIClient;
+  nodeCfg: NodeConfig;
+}
+const eventConns = new Map<string, EventConn>();
+
+function handleAmiEvent(node: string, fields: Record<string, string>): void {
+  const event = fields["Event"];
+  if (!event) return;
+
+  let text: string;
+  if (event === "VerboseMessage") {
+    text = fields["Output"] ?? "";
+  } else {
+    const parts = [event];
+    for (const k of ["Channel", "Peer", "Cause-txt", "Description", "Privilege"]) {
+      if (fields[k]) parts.push(`${k}=${fields[k]}`);
+    }
+    text = parts.join("  ");
+  }
+  if (!text.trim()) return;
+
+  const line = `[${new Date().toISOString().slice(11, 19)}] ${text}`;
+  const hist = consoleHistory.get(node) ?? [];
+  hist.push(line);
+  if (hist.length > CONSOLE_MAX) hist.shift();
+  consoleHistory.set(node, hist);
+  broadcast("console_line", { node, text: line });
+}
+
+function startEventStreams(): void {
+  for (const nodeCfg of cfg.nodes) {
+    const nodeStr = String(nodeCfg.node);
+    const key = nodeCfg.host;
+    const client = new AMIClient(nodeCfg.host, cfg.server.ami_connect_timeout_s, cfg.server.ami_read_timeout_s);
+    const conn: EventConn = { socket: null, cleanup: null, client, nodeCfg };
+    eventConns.set(key, conn);
+
+    const connect = async () => {
+      try {
+        conn.socket = await client.connectEvents(nodeCfg.user, nodeCfg.password);
+        conn.socket.on("error", () => { conn.cleanup?.(); conn.socket = null; setTimeout(connect, 5_000); });
+        conn.socket.on("close",  () => { conn.cleanup?.(); conn.socket = null; setTimeout(connect, 5_000); });
+        try { await client.command(conn.socket, "core set verbose 3"); } catch (_) {}
+        conn.cleanup = client.listenEvents(conn.socket, (f) => handleAmiEvent(nodeStr, f));
+        console.log(`AMI event stream: ${key} (node ${nodeStr})`);
+      } catch (err) {
+        console.warn(`AMI event stream failed for ${key}:`, (err as Error).message);
+        setTimeout(connect, 10_000);
+      }
+    };
+    connect();
+  }
+}
+
 // ── SSE broadcaster ───────────────────────────────────────────────────────────
 
 interface SSEClient { res: http.ServerResponse; }
@@ -597,6 +661,7 @@ function runScheduler(): void {
 setInterval(pollNodes, cfg.server.poll_interval_ms);
 pollNodes();
 runScheduler();
+startEventStreams();
 
 // SSE keepalive — comment sent every 25 s prevents NAT/proxy idle timeouts
 setInterval(() => {
@@ -831,6 +896,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname === "/api/console/history" && req.method === "GET") {
+    const node = url.searchParams.get("node") ?? "";
+    json(res, 200, { node, lines: consoleHistory.get(node) ?? [] });
+    return;
+  }
+
   // ── Favorites status (public) ─────────────────────────────────────────────
   // Returns live data for each node in cfg.favorites.nodes by querying the
   // AllStar stats API. Results are not cached here — the client polls at its
@@ -892,6 +963,12 @@ const server = http.createServer(async (req, res) => {
     // Send current known state immediately so page isn't blank on load
     for (const status of lastStatus.values()) {
       res.write(`event: node_status\ndata: ${JSON.stringify(status)}\n\n`);
+    }
+    // Replay console ring buffer so the Console tab pre-fills on connect
+    for (const [node, lines] of consoleHistory) {
+      for (const text of lines) {
+        res.write(`event: console_line\ndata: ${JSON.stringify({ node, text })}\n\n`);
+      }
     }
     const client: SSEClient = { res };
     sseClients.add(client);

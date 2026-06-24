@@ -163,6 +163,22 @@ header .spacer { flex: 1; }
   color: var(--muted);
   text-transform: uppercase;
 }
+#clock-local {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+#clock-tz-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
 
 /* Status indicator: dot + text */
 #status-area {

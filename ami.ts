@@ -118,6 +118,33 @@ export class AMIClient {
     }
   }
 
+  // Like connect() but logs in with EVENTS: on so Asterisk pushes unsolicited
+  // event packets (VerboseMessage, channel events, etc.) on the socket.
+  async connectEvents(user: string, password: string): Promise<net.Socket> {
+    const socket = await this._openSocket();
+    await this._loginEvents(socket, user, password);
+    return socket;
+  }
+
+  // Attaches a persistent data listener that parses incoming AMI event packets
+  // and calls onEvent for each one. Returns a cleanup function.
+  listenEvents(
+    socket: net.Socket,
+    onEvent: (fields: Record<string, string>) => void,
+  ): () => void {
+    let buffer = "";
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      const packets = buffer.split("\r\n\r\n");
+      buffer = packets.pop() ?? "";
+      for (const pkt of packets) {
+        if (pkt.trim()) onEvent(parseAmiPacket(pkt));
+      }
+    };
+    socket.on("data", onData);
+    return () => socket.removeListener("data", onData);
+  }
+
   // ── Private helpers ──────────────────────────────────────────────────────
 
   private _openSocket(): Promise<net.Socket> {
@@ -153,6 +180,21 @@ export class AMIClient {
     const response = await this._readResponse(socket, actionID);
     if (!response.includes("Authentication accepted")) {
       throw new Error("AMI login failed — check username and password in config.toml");
+    }
+  }
+
+  private async _loginEvents(socket: net.Socket, user: string, password: string): Promise<void> {
+    const actionID = "evlogin_" + user;
+    const packet =
+      `ACTION: LOGIN\r\n` +
+      `USERNAME: ${user}\r\n` +
+      `SECRET: ${password}\r\n` +
+      `EVENTS: on\r\n` +
+      `ActionID: ${actionID}\r\n\r\n`;
+    await this._write(socket, packet);
+    const response = await this._readResponse(socket, actionID);
+    if (!response.includes("Authentication accepted")) {
+      throw new Error("AMI event login failed — check username and password in config.toml");
     }
   }
 
@@ -221,6 +263,16 @@ export class AMIClient {
 }
 
 // ── Parsing ───────────────────────────────────────────────────────────────────
+
+// Parses a raw AMI packet (CRLF-delimited "Key: Value" lines) into a flat map.
+export function parseAmiPacket(packet: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const line of packet.split(/\r?\n/)) {
+    const idx = line.indexOf(": ");
+    if (idx > 0) fields[line.slice(0, idx)] = line.slice(idx + 2);
+  }
+  return fields;
+}
 
 // AllStar XStat reports elapsed as either plain seconds or "H:MM:SS" / "MM:SS".
 function parseElapsed(s: string | undefined): number {

@@ -40,7 +40,7 @@ function applyTheme(id) {
 }
 
 function initTheme() {
-  const saved = localStorage.getItem("nodewatch-theme") ?? "amber";
+  const saved = localStorage.getItem("nodewatch-theme") ?? "slate";
   const sel = document.getElementById("theme-select");
   if (sel && sel.options.length === 0) {
     THEMES.forEach(t => {
@@ -148,11 +148,32 @@ async function initClock() {
 
 function tickClock() {
   const now = new Date(Date.now() + clockOffsetMs);
-  const hh  = String(now.getUTCHours()).padStart(2, "0");
-  const mm  = String(now.getUTCMinutes()).padStart(2, "0");
-  const ss  = String(now.getUTCSeconds()).padStart(2, "0");
-  const el  = document.getElementById("clock");
+
+  // UTC
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  const ss = String(now.getUTCSeconds()).padStart(2, "0");
+  const el = document.getElementById("clock");
   if (el) el.textContent = `${hh}:${mm}:${ss}`;
+
+  // Local (configured timezone)
+  const tz = config?.display?.timezone;
+  if (tz) {
+    try {
+      const lparts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      }).formatToParts(now);
+      const get = (t) => lparts.find(p => p.type === t)?.value ?? "00";
+      const lh = get("hour") === "24" ? "00" : get("hour");
+      const localEl = document.getElementById("clock-local");
+      if (localEl) localEl.textContent = `${lh}:${get("minute")}:${get("second")}`;
+
+      const tzAbbr = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" })
+        .formatToParts(now).find(p => p.type === "timeZoneName")?.value ?? tz;
+      const tzLbl = document.getElementById("clock-tz-label");
+      if (tzLbl) tzLbl.textContent = tzAbbr;
+    } catch (_) {}
+  }
 }
 
 // ── Schedule helpers ──────────────────────────────────────────────────────────
@@ -413,6 +434,7 @@ function switchTab(name) {
 
   if (name === "favorites") loadFavorites();
   if (name === "schedule")  loadSchedules();
+  if (name === "console")   loadConsole();
   if (name === "settings")  loadSettings();
 }
 
@@ -725,6 +747,78 @@ async function addFavorite() {
 async function removeFavorite(node) {
   await apiPost("/api/favorites/remove", { node: parseInt(node) });
   await pollFavorites();
+}
+
+// ── Console tab ───────────────────────────────────────────────────────────────
+
+let consoleNode = null;
+let consoleAutoScroll = true;
+let consoleListener = null;
+
+async function loadConsole() {
+  const area = document.getElementById("console-area");
+  if (!area) return;
+
+  // Only build the UI once; subsequent tab switches just keep the existing DOM
+  if (!area.dataset.loaded) {
+    area.dataset.loaded = "1";
+    consoleNode = String(config.nodes[0]?.node ?? "");
+
+    const nodeOptions = config.nodes.map(n =>
+      `<option value="${n.node}">${n.node}${n.label ? " — " + escHtml(n.label) : ""}</option>`
+    ).join("");
+
+    area.innerHTML = `
+      <div class="console-toolbar">
+        <select id="console-node-sel">${nodeOptions}</select>
+        <button id="console-clear-btn">Clear</button>
+        <label class="console-autoscroll-label">
+          <input type="checkbox" id="console-autoscroll" checked> Auto-scroll
+        </label>
+      </div>
+      <pre id="console-output"></pre>`;
+
+    const output = document.getElementById("console-output");
+
+    function appendLine(text) {
+      const span = document.createElement("span");
+      span.className = /error/i.test(text) ? "line-error" : /warn/i.test(text) ? "line-warn" : "";
+      span.textContent = text + "\n";
+      output.appendChild(span);
+      if (consoleAutoScroll) output.scrollTop = output.scrollHeight;
+    }
+
+    async function fetchHistory(node) {
+      try {
+        const data = await (await fetch(`/api/console/history?node=${encodeURIComponent(node)}`)).json();
+        output.textContent = "";
+        for (const line of data.lines ?? []) appendLine(line);
+      } catch (_) {}
+    }
+
+    await fetchHistory(consoleNode);
+
+    // Wire SSE listener — reuse the existing sseSource opened by connectSSE()
+    if (consoleListener && sseSource) sseSource.removeEventListener("console_line", consoleListener);
+    consoleListener = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.node === consoleNode) appendLine(data.text);
+    };
+    if (sseSource) sseSource.addEventListener("console_line", consoleListener);
+
+    document.getElementById("console-node-sel").addEventListener("change", async (e) => {
+      consoleNode = e.target.value;
+      await fetchHistory(consoleNode);
+    });
+
+    document.getElementById("console-clear-btn").addEventListener("click", () => {
+      output.textContent = "";
+    });
+
+    document.getElementById("console-autoscroll").addEventListener("change", (e) => {
+      consoleAutoScroll = e.target.checked;
+    });
+  }
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────────
