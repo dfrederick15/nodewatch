@@ -75,7 +75,7 @@ fun NodewatchNavGraph(navController: NavHostController = rememberNavController()
             arguments = listOf(navArgument("serverId") { type = NavType.StringType }),
         ) { back ->
             val id = back.arguments!!.getString("serverId")!!
-            ServerSettingsScreen(serverId = id, onDeleted = { navController.navigate(Route.ServerList.path) { popUpTo(0) } })
+            ServerSettingsScreen(serverId = id, onBack = { navController.popBackStack() }, onDeleted = { navController.navigate(Route.ServerList.path) { popUpTo(0) } })
         }
     }
 }

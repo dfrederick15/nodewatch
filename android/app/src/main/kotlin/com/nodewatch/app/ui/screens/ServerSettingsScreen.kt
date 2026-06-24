@@ -13,6 +13,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun ServerSettingsScreen(
     serverId: String,
+    onBack: () -> Unit,
     onDeleted: () -> Unit,
     vm: ServerSettingsViewModel = hiltViewModel(),
 ) {
@@ -26,7 +27,7 @@ fun ServerSettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Server Settings") },
-                navigationIcon = { IconButton(onClick = {}) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             )
         }
     ) { padding ->
