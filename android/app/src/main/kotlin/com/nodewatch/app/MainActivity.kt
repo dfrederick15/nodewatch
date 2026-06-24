@@ -14,7 +14,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             NodewatchTheme {
-                // NavGraph goes here in Task 10
+                NodewatchNavGraph()
             }
         }
     }
