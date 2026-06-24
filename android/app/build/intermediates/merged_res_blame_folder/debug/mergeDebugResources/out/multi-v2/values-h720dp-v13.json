@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.nodewatch.app-mergeDebugResources-70:/values-h720dp-v13/values-h720dp-v13.xml",
+            "map": [
+                {
+                    "source": "/home/devin/.gradle/caches/8.9/transforms/7d6b49f0f3563646602ded7485029edc/transformed/appcompat-1.6.1/res/values-h720dp-v13/values-h720dp-v13.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "66",
+                        "endOffsets": "117"
+                    }
+                }
+            ]
+        }
+    ]
+}
